@@ -5,6 +5,7 @@ import os
 import json
 import copy
 import datetime
+import natsort
 import logging
 
 from .exceptions import FsdbError
@@ -36,7 +37,7 @@ class Table(object):
             }
         }
         self.index = 'id'  # used to name record folders
-        self.record_ids = []
+        self.record_ids = []  # is sorted by natsort
 
         self.init()
         self.load_data()
@@ -103,7 +104,7 @@ class Table(object):
 
     def get_record_ids(self):
         record_ids = []
-        for index in sorted(os.listdir(self.table_path)):
+        for index in natsort.natsorted(os.listdir(self.table_path)):
             record_path = os.path.join(self.table_path, index)
             if not os.path.isdir(record_path):
                 continue

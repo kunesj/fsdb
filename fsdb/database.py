@@ -9,6 +9,7 @@ import logging
 from .exceptions import FsdbError
 from .tools import sanitize_filename
 from .table import Table
+from .record import Record
 from .cache import Cache
 
 _logger = logging.getLogger(__name__)
@@ -76,6 +77,65 @@ class Database(object):
                 continue
             self.tables[name] = Table(name, self)
 
-    # query
+    # query (records)
 
-    # def record_
+    def query(self, action, table_name, values, where):
+        """
+        :param action: INSERT/SELECT/UPDATE/DELETE [str]
+        :param table_name: table name [str]
+        :param values: new record values (used by action=INSERT/UPDATE) [dict]
+        :param where: basic search domain (used by action=SELECT/UPDATE/DELETE) [domain]
+            - only search by index field allowed (right now)
+        :return: list of records/results
+        """
+        if table_name not in self.tables:
+            FsdbError('Table "{}" not found!'.format(table_name))
+        table = self.tables[table_name]
+
+        if action.upper() == 'INSERT':
+            return [Record.create(table, values), ]
+
+        elif action.upper() == 'SELECT':
+            where = where if where else []
+            record_ids = copy.deepcopy(table.record_ids)
+
+            for dom in where:
+                dom_field, dom_eq, dom_value = tuple(dom)
+                if dom_field != table.index:
+                    FsdbError('Only index field can be used in domain!')
+
+                for rid in record_ids:
+                    if dom_eq == '=':
+                        if dom_value != rid:
+                            record_ids.remove(rid)
+                    elif dom_eq == '!=':
+                        if dom_value == rid:
+                            record_ids.remove(rid)
+
+            records = []
+            for rid in record_ids:
+                records.append(Record(rid, table))
+
+            return records
+
+        elif action.upper() == 'UPDATE':
+            records = self.query('SELECT', table_name, False, where)
+            for rec in records:
+                rec.write(values)
+            return records
+
+        elif action.upper() == 'DELETE':
+            records = self.query('SELECT', table_name, False, where)
+            return [rec.delete() for rec in records]
+
+    def query_insert(self, table_name, values):
+        return self.query('INSERT', table_name, values, False)
+
+    def query_select(self, table_name, where):
+        return self.query('SELECT', table_name, False, where)
+
+    def query_update(self, table_name, values, where):
+        return self.query('UPDATE', table_name, values, where)
+
+    def query_delete(self, table_name, where):
+        return self.query('DELETE', table_name, False, where)

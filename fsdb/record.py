@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import shutil
 import json
 import copy
 import datetime
@@ -26,8 +27,15 @@ class Record(object):
         self.record_path = None
         self.data_fname = 'data.json'
         self.data_path = None
+        self._deleted = False
 
         self.init()
+
+    def __getattribute__(self, name):
+        if object.__getattribute__(self, '_deleted'):
+            FsdbError('Can\'t access deleted records!')
+        else:
+            return object.__getattribute__(self, name)
 
     def init(self):
         assert self.index and self.table_path and self.data_fname
@@ -40,24 +48,17 @@ class Record(object):
         self.data_fname = sanitize_filename(self.data_fname)
         self.data_path = os.path.join(self.record_path, self.data_fname)
 
-        # init db directory
-        if not os.path.exists(self.record_path):
-            os.makedirs(self.record_path)
-
-        # init values
-        if not os.path.exists(self.data_path):
-            values = {k: None for k in self.fields}
-            values[self.table.index] = self.index
-            self.save_values(values)
-
     def save_values(self, values):
+        default_values = {k: None for k in self.fields}
+        values = dict(default_values, **copy.deepcopy(values))
         with open(self.data_path, 'w') as f:
-            f.write(json.dumps(copy.deepcopy(values), sort_keys=True, indent=4))
+            f.write(json.dumps(values, sort_keys=True, indent=4))
 
     def load_values(self):
+        default_values = {k: None for k in self.fields}
         with open(self.data_path, 'r') as f:
             values = json.loads(f.read())
-        return values
+        return dict(default_values, **values)
 
     def get_cache_key(self):
         return "{}-{}".format(self.table.name, self.index)
@@ -155,5 +156,20 @@ class Record(object):
             raise FsdbError('Index must be unique!')
 
         obj = cls(index, table)
+
+        # init record directory
+        if not os.path.exists(obj.record_path):
+            os.makedirs(obj.record_path)
+
+        # init values
+        if not os.path.exists(obj.data_path):
+            values = {k: None for k in obj.fields}
+            values[obj.table.index] = obj.index
+            obj.save_values(values)
+
         obj.write(values)
         table.record_ids.append(obj.index)
+
+    def delete(self):
+        shutil.rmtree(self.record_path)
+        self._deleted = True
