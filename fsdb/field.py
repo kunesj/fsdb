@@ -21,7 +21,7 @@ class Field(object):
     # indexable field types
     INDEXABLE_FIELD_TYPES = ['int', 'float', 'datetime']
 
-    DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S'
+    DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S.%f'
 
     def __init__(self, name, type, table, index=False, unique_index=False, main_index=False):
         # field data
