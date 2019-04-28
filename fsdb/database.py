@@ -16,58 +16,47 @@ _logger = logging.getLogger(__name__)
 
 
 class Database(object):
+    # TODO: wait for one transaction to finish before doing next one
 
     def __init__(self, name, root_path):
-        self.name = name
+        self.name = sanitize_filename(name)
         self.root_path = root_path
 
-        self.db_path = None
-        self.data_fname = 'data.json'
-        self.data_path = None
+        self.db_path = os.path.join(self.root_path, self.name)
+        # self.data_fname = sanitize_filename('data.json')
+        # self.data_path = os.path.join(self.db_path, self.data_fname)
 
         self.tables = {}
         self.cache = Cache()
-
-        self.init()
-        self.load_data()
-        self.load_tables()
-
-    def init(self):
-        assert self.name and self.root_path and self.data_fname
-
-        # make name valid + build db_path
-        self.name = sanitize_filename(self.name)
-        self.db_path = os.path.join(self.root_path, self.name)
-
-        # make data filename valid + build data_path
-        self.data_fname = sanitize_filename(self.data_fname)
-        self.data_path = os.path.join(self.db_path, self.data_fname)
 
         # init db directory
         if not os.path.exists(self.db_path):
             os.makedirs(self.db_path)
 
-        # init db data (config)
-        if not os.path.exists(self.data_path):
-            self.save_data()
+        # # init db data (config)
+        # if not os.path.exists(self.data_path):
+        #     self.save_data()
 
-    def save_data(self):
-        # format data dict
-        data = copy.deepcopy({
-            'name': self.name,
-        })
+        # self.load_data()
+        self.load_tables()
 
-        # write to file
-        with open(self.data_path, 'w') as f:
-            f.write(json.dumps(data, sort_keys=True, indent=4))
+    # def save_data(self):
+    #     # format data dict
+    #     data = copy.deepcopy({
+    #         'name': self.name,
+    #     })
+    #
+    #     # write to file
+    #     with open(self.data_path, 'w') as f:
+    #         f.write(json.dumps(data, sort_keys=True, indent=2))
 
-    def load_data(self):
-        # load from file
-        with open(self.data_path, 'r') as f:
-            data = json.loads(f.read())
-
-        # parse data dict
-        pass
+    # def load_data(self):  # TODO: use for cache size
+    #     # load from file
+    #     with open(self.data_path, 'r') as f:
+    #         data = json.loads(f.read())
+    #
+    #     # parse data dict
+    #     pass
 
     def load_tables(self):
         self.tables = {}
@@ -76,66 +65,169 @@ class Database(object):
             if not os.path.isdir(table_path):
                 continue
             self.tables[name] = Table(name, self)
+        return self.tables
 
-    # query (records)
+    # table
 
-    def query(self, action, table_name, values, where):
+    def create_table(self, values):
+        table = Table.create(self, values)
+        self.tables[table.name] = table
+        return table
+
+    def update_table(self, name, values):
+        table = self.get_table(name)
+        table.update(values)
+
+    def get_table(self, name, raise_exception=True):
+        if name not in self.tables:
+            if raise_exception:
+                raise FsdbError('Table "{}" not found!'.format(name))
+            return None
+        return self.tables[name]
+
+    def delete_table(self, name):
+        table = self.get_table(name)
+        table.delete()
+        del(self.tables[name])
+
+    # record
+
+    def create(self, table_name, values):
+        table = self.get_table(table_name)
+        rec = Record.create(table, values)
+        if rec.index not in table.record_ids:
+            table.record_ids.append(rec.index)
+        return rec
+
+    def write(self, table_name, values, domain=None):
+        records = self.search(table_name, domain)
+        for rec in records:
+            rec.write(values)
+        return records
+
+    def browse(self, table_name, ids):
         """
-        :param action: INSERT/SELECT/UPDATE/DELETE [str]
-        :param table_name: table name [str]
-        :param values: new record values (used by action=INSERT/UPDATE) [dict]
-        :param where: basic search domain (used by action=SELECT/UPDATE/DELETE) [domain]
-            - only search by index field allowed (right now)
-        :return: list of records/results
+        :param table_name:
+        :param ids: list of ids / one id
+        :return: list of records / one record
         """
-        if table_name not in self.tables:
-            FsdbError('Table "{}" not found!'.format(table_name))
-        table = self.tables[table_name]
+        table = self.get_table(table_name)
+        return table.browse_records(ids)
 
-        if action.upper() == 'INSERT':
-            return [Record.create(table, values), ]
+    def search(self, table_name, domain=None, limit=None):
+        table = self.get_table(table_name)
+        domain = domain if domain else []
 
-        elif action.upper() == 'SELECT':
-            where = where if where else []
-            record_ids = copy.deepcopy(table.record_ids)
+        # validate domain
+        for dom in domain:
+            if isinstance(dom, str):
+                if dom not in ['&', '|']:
+                    FsdbError('Invalid domain logic operator "{}"! Only "&" and "|" are allowed.'.format(dom))
 
-            for dom in where:
+            else:
                 dom_field, dom_eq, dom_value = tuple(dom)
-                if dom_field != table.index:
-                    FsdbError('Only index field can be used in domain!')
+                if dom_field not in table.fields:
+                    FsdbError('Invalid field name "{}" for table "{}"!'.format(dom_field, table.name))
+                if dom_field != table.main_index:
+                    _logger.warning('Searching by field "{}" will be very slow and resource intensive, '
+                                    'because it\'s not index!'.format(dom_field))
+                if dom_eq in ['in', 'not in'] and not isinstance(dom_value, list):
+                    FsdbError('Domain with \'in\' or \'not in\' must have value of type list!')
 
-                for rid in record_ids:
+        # filter record ids with domain
+        if len(domain) == 0:
+            if limit is None:
+                record_ids = table.record_ids
+            else:
+                record_ids = table.record_ids[:limit]
+
+        else:
+            record_ids = []
+            for rid in table.record_ids:
+                record = None
+
+                domain_processed = []
+                for dom in domain:
+                    # & or |
+                    if isinstance(dom, str):
+                        domain_processed.append(dom)
+                        continue
+
+                    # get sub-domain
+                    dom_field, dom_eq, dom_value = tuple(dom)
+
+                    # get field value
+                    if table.fields[dom_field].index:
+                        field_value = table.fields[dom_field].get_from_index(rid)
+                    else:
+                        if record is None:
+                            record = Record(rid, table)
+                        field_value = record.read([dom_field, ])[dom_field]
+
+                    # filter record by sub-domain
                     if dom_eq == '=':
-                        if dom_value != rid:
-                            record_ids.remove(rid)
+                        domain_processed.append(field_value == dom_value)
                     elif dom_eq == '!=':
-                        if dom_value == rid:
-                            record_ids.remove(rid)
+                        domain_processed.append(field_value != dom_value)
+                    elif dom_eq == 'in':
+                        domain_processed.append(field_value in dom_value)
+                    elif dom_eq == 'not in':
+                        domain_processed.append(field_value not in dom_value)
+                    elif dom_eq == '>':
+                        domain_processed.append(field_value > dom_value)
+                    elif dom_eq == '>=':
+                        domain_processed.append(field_value >= dom_value)
+                    elif dom_eq == '<':
+                        domain_processed.append(field_value < dom_value)
+                    elif dom_eq == '<=':
+                        domain_processed.append(field_value <= dom_value)
+                    else:
+                        raise FsdbError('Invalid domain! {}'.format(domain))
 
-            records = []
-            for rid in record_ids:
-                records.append(Record(rid, table))
+                # evaluate processed domain
+                while len(domain_processed) >= 2:
+                    domain_changed = False
+                    for i in range(len(domain_processed)-1):
+                        if isinstance(domain_processed[i], bool) and isinstance(domain_processed[i+1], bool):
+                            op = domain_processed[i-1] if i != 0 else '&'
+                            if op == '&':
+                                out = domain_processed[i] and domain_processed[i+1]
+                            elif op == '|':
+                                out = domain_processed[i] or domain_processed[i+1]
+                            else:
+                                raise FsdbError('Invalid processed domain! {}'.format(domain_processed))
 
-            return records
+                            if i == 0:
+                                domain_processed.pop(i+1)
+                                domain_processed[i] = out
+                            else:
+                                domain_processed.pop(i+1)
+                                domain_processed[i-1] = out
+                                domain_processed.pop(i)
 
-        elif action.upper() == 'UPDATE':
-            records = self.query('SELECT', table_name, False, where)
-            for rec in records:
-                rec.write(values)
-            return records
+                            domain_changed = True
+                            break
 
-        elif action.upper() == 'DELETE':
-            records = self.query('SELECT', table_name, False, where)
-            return [rec.delete() for rec in records]
+                    if not domain_changed:
+                        break
 
-    def query_insert(self, table_name, values):
-        return self.query('INSERT', table_name, values, False)
+                if len(domain_processed) > 1:
+                    raise FsdbError('Invalid processed domain! {}'.format(domain_processed))
+                result = bool(domain_processed[0])
 
-    def query_select(self, table_name, where):
-        return self.query('SELECT', table_name, False, where)
+                # evaluate result
+                if result:
+                    record_ids.append(rid)
+                    if limit is not None and len(record_ids) >= limit:
+                        break
 
-    def query_update(self, table_name, values, where):
-        return self.query('UPDATE', table_name, values, where)
+        # return records
+        return [Record(rid, table) for rid in record_ids]
 
-    def query_delete(self, table_name, where):
-        return self.query('DELETE', table_name, False, where)
+    def delete(self, table_name, domain=None):
+        table = self.get_table(table_name)
+        records = self.search(table_name, domain)
+        for rec in records:
+            if rec.index in table.record_ids:
+                table.record_ids.remove(rec.index)
+            rec.delete()

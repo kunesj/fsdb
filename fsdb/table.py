@@ -4,63 +4,47 @@
 import os
 import json
 import copy
-import datetime
-import natsort
+import shutil
 import logging
 
 from .exceptions import FsdbError
 from .tools import sanitize_filename
+from .field import Field
+from .record import Record
 
 _logger = logging.getLogger(__name__)
 
 
 class Table(object):
 
-    # all field types that should be saved in json file in data_path of record
-    FIELD_TYPES_IN_DATA = ['bool', 'str', 'int', 'float', 'list', 'tuple', 'dict', 'datetime']
-    # all valid field types
-    FIELD_TYPES = FIELD_TYPES_IN_DATA + []
+    _deleted = False
 
     def __init__(self, name, database):
-        self.name = name
+        self.name = sanitize_filename(name)
         self.database = database
         self.cache = self.database.cache
         self.db_path = self.database.db_path
 
-        self.table_path = None
-        self.data_fname = 'data.json'
-        self.data_path = None
-
-        self.fields = {
-            'id': {
-                'type': 'number',
-            }
-        }
-        self.index = 'id'  # used to name record folders
-        self.record_ids = []  # is sorted by natsort
-
-        self.init()
-        self.load_data()
-        self.get_record_ids()
-
-    def init(self):
-        assert self.name and self.db_path and self.data_fname
-
-        # make name valid + build table_path
-        self.name = sanitize_filename(self.name)
         self.table_path = os.path.join(self.db_path, self.name)
-
-        # make data filename valid + build data_path
-        self.data_fname = sanitize_filename(self.data_fname)
+        self.data_fname = sanitize_filename('data.json')
         self.data_path = os.path.join(self.table_path, self.data_fname)
 
-        # init table directory
-        if not os.path.exists(self.table_path):
-            os.makedirs(self.table_path)
+        self.fields = {
+            'id': Field('id', 'int', self, index=True, main_index=True)
+        }
+        self.main_index = 'id'  # used to name record folders (parsed from self.fields at load_data())
+        self.record_ids = []  # NOT sorted
 
-        # init table data (config)
-        if not os.path.exists(self.data_path):
-            self.save_data()
+        if os.path.exists(self.data_path):
+            self.load_data()
+            self.load_record_ids()
+            self.build_indexes()
+
+    def __getattribute__(self, name):
+        if object.__getattribute__(self, '_deleted'):
+            FsdbError('Can\'t access deleted tables!')
+        else:
+            return object.__getattribute__(self, name)
 
     def save_data(self):
         # validate
@@ -69,13 +53,12 @@ class Table(object):
         # format data dict
         data = copy.deepcopy({
             'name': self.name,  # just for info
-            'fields': self.fields,
-            'index': self.index,
+            'fields': [self.fields[name].to_dict() for name in sorted(self.fields.keys())],
         })
 
         # write to file
         with open(self.data_path, 'w') as f:
-            f.write(json.dumps(data, sort_keys=True, indent=4))
+            f.write(json.dumps(data, sort_keys=True, indent=2))
 
     def load_data(self):
         # load from file
@@ -83,48 +66,108 @@ class Table(object):
             data = json.loads(f.read())
 
         # parse data dict
-        self.fields = data['fields']
-        self.index = data['index']
+        self.fields = {}
+        for field_data in data['fields']:
+            self.fields[field_data['name']] = Field.from_dict(self, field_data)
+
+        # parse main index
+        for name in self.fields:
+            if self.fields[name].main_index:
+                self.main_index = self.fields[name].name
+                break
 
         # validate
         self.validate()
 
     def validate(self):
-        # field types
+        # one and only one main index
+        main_index_found = False
         for name in self.fields:
-            field_type = self.fields[name]['type'].lower()
-            if field_type not in self.FIELD_TYPES:
-                _logger.warning('Invalid field type "{}" for field "{}" in table "{}".'.format(field_type, name, self.name))
+            if self.fields[name].main_index and main_index_found:
+                FsdbError('Only one main index allowed for table "{}"!'.format(self.name))
+            elif self.fields[name].main_index:
+                main_index_found = True
+        if not main_index_found:
+            FsdbError('No main index defined for table "{}"!'.format(self.name))
 
-        # index
-        if self.index not in self.fields:
-            raise FsdbError('Index "{}" of table "{}" is not in fields!'.format(self.index, self.name))
-        if self.fields[self.index]['type'].lower() not in ['int', 'float', 'datetime']:
-            raise FsdbError('Index "{}" of table "{}" has invalid index type!'.format(self.index, self.name))
-
-    def get_record_ids(self):
-        record_ids = []
-        for index in natsort.natsorted(os.listdir(self.table_path)):
+    def load_record_ids(self):
+        self.record_ids = []
+        for index in os.listdir(self.table_path):
             record_path = os.path.join(self.table_path, index)
             if not os.path.isdir(record_path):
                 continue
-            record_ids.append(index)
-        self.record_ids = record_ids
-        return record_ids
+            self.record_ids.append(index)
+        return self.record_ids
 
-    def get_next_index(self):
-        field_type = self.fields[self.index]['type'].lower()
-
-        if field_type == 'int':
-            record_ids = [int(record_id) for record_id in self.record_ids]
-            return max(record_ids) + 1
-
-        elif field_type == 'float':
-            record_ids = [float(record_id) for record_id in self.record_ids]
-            return max(record_ids) + 1
-
-        elif field_type == 'datetime':
-            return datetime.datetime.now()
+    def browse_records(self, ids):
+        if isinstance(ids, list):
+            records = []
+            for rid in ids:
+                if rid in self.record_ids:
+                    records.append(Record(rid, self))
+            return records
 
         else:
-            raise FsdbError('Unexpected type "{}" for index "{}" in table "{}"!'.format(field_type, self.index, self.name))
+            return Record(ids, self) if ids in self.record_ids else None
+
+    def build_indexes(self):
+        _logger.info('Building indexes for table "{}"'.format(self.name))
+
+        # get list of fields that are indexes
+        index_field_names = []
+        for name in self.fields:
+            if self.fields[name].index:
+                index_field_names.append(name)
+
+        # prefetch data to cache
+        records = self.browse_records(self.record_ids)
+        for rec in records[:10000]:
+            rec.read(index_field_names)
+
+        # build indexes
+        for name in index_field_names:
+            self.fields[name].build_index(records)
+
+    # create/update/delete
+
+    @classmethod
+    def create(cls, database, values):
+        # get table name
+        if 'name' not in values:
+            raise FsdbError('Missing table name value!')
+        table_name = sanitize_filename(values['name'])
+        del(values['name'])
+
+        # detect if table already exists
+        if os.path.exists(os.path.join(database.db_path, table_name)):
+            raise FsdbError('Table "{}" name already exists!'.format(table_name))
+
+        # init empty table
+        obj = cls(table_name, database)
+        os.makedirs(obj.table_path)
+        obj.save_data()
+
+        # write table values
+        obj.update(values)
+
+        return obj
+
+    def update(self, values):
+        if 'name' in values:
+            _logger.warning('Attempted to update table name of table "{}". Ignoring.'.format(self.name))
+        if 'fields' in values:
+            self.fields = {}
+            for field_data in values['fields']:
+                self.fields[field_data['name']] = Field.from_dict(self, field_data)
+        self.validate()
+        self.save_data()
+        self.load_record_ids()
+        self.build_indexes()
+
+    def delete(self):
+        # delete cached records
+        self.cache.clear_cache()
+        # delete data
+        shutil.rmtree(self.table_path)
+        # mark object as deleted
+        self._deleted = True
