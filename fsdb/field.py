@@ -3,7 +3,6 @@
 
 import datetime
 from operator import itemgetter
-import natsort
 import logging
 
 from .exceptions import FsdbError
@@ -34,7 +33,7 @@ class Field(object):
         self.database = self.table.database
         self.in_data = self.type in self.FIELD_TYPES_IN_DATA  # TODO: use this
         self.index_build = False
-        self.indexed_values = []  # [(value, record_id), ...] natsorted by value
+        self.indexed_values = []  # [(value, record_id), ...] sorted by value  # TODO: do I even need this sorted??? 
 
         # validate
         self.validate()
@@ -107,8 +106,8 @@ class Field(object):
         for rec in records:
             self.indexed_values.append((rec.read([self.name])[self.name], rec.index))
 
-        # natsort list of (value, id) by value
-        self.indexed_values = natsort.natsorted(self.indexed_values, key=itemgetter(0))
+        # sort list of (value, id) by value
+        self.indexed_values = sorted(self.indexed_values, key=itemgetter(0))
         self.index_build = True
 
         return self.indexed_values
@@ -127,7 +126,7 @@ class Field(object):
 
         # add new value and sort
         self.indexed_values.append((value, rid))
-        self.indexed_values = natsort.natsorted(self.indexed_values, key=itemgetter(0))
+        self.indexed_values = sorted(self.indexed_values, key=itemgetter(0))
 
     def remove_from_index(self, rid):
         if not self.index:
