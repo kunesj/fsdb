@@ -55,10 +55,23 @@ class TestFSDB(unittest.TestCase):
             'val2': datetime.datetime(2000, 1, 2),
         }).index
 
+        self.db.create_table({
+            'name': 'test_table_datetime',
+            'fields': [
+                {'name': 'id', 'type': 'datetime', 'main_index': True, },
+            ],
+        })
+        self.db.create('test_table_datetime', {})
+        self.db.create('test_table_datetime', {})
+        self.db.create('test_table_datetime', {})
+
         # reopen database
         self.db = fsdb.Database(self.db.name, self.root_path)
 
         # test if data was correctly created
+        records = self.db.search('test_table', [])
+        self.assertEqual(len(records), 2)
+
         rec1 = self.db.browse('test_table', rec1_id)
         self.assertIsNotNone(rec1)
         rec2 = self.db.browse('test_table', rec2_id)
@@ -72,6 +85,9 @@ class TestFSDB(unittest.TestCase):
         self.assertEqual(rec2_data['val1'], 'test_val1-2')
         self.assertEqual(rec2_data['val2'], datetime.datetime(2000, 1, 2))
         self.assertEqual(rec2_data['val3'], None)
+
+        records = self.db.search('test_table_datetime', [])
+        self.assertEqual(len(records), 3)
 
 
 if __name__ == '__main__':

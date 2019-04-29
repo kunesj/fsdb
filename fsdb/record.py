@@ -16,6 +16,7 @@ _logger = logging.getLogger(__name__)
 
 class Record(object):
 
+    data_fname = sanitize_filename('data.json')
     _deleted = False
 
     def __init__(self, index, table):
@@ -28,8 +29,9 @@ class Record(object):
 
         self.index_str = self.fields[self.table.main_index].val2str(self.index)
         self.record_path = os.path.join(self.table_path, self.index_str)
-        self.data_fname = sanitize_filename('data.json')
         self.data_path = os.path.join(self.record_path, self.data_fname)
+
+        self.cache_key = self.generate_cache_key()
 
     def __getattribute__(self, name):
         table = object.__getattribute__(self, 'table')
@@ -41,18 +43,49 @@ class Record(object):
             return object.__getattribute__(self, name)
 
     def save_values(self, values):
+        # init default values
         default_values = {k: None for k in self.fields}
         values = dict(default_values, **copy.deepcopy(values))
+
+        # convert values to json compatible format
+        for name in values:
+            if name not in self.fields or values[name] is None:
+                continue
+            field_type = self.fields[name].type
+
+            if field_type == 'datetime':
+                values[name] = self.fields[name].val2str(values[name])
+            elif field_type == 'tuple':
+                values[name] = list(values[name])
+
+        # write to file
         with open(self.data_path, 'w') as f:
             f.write(json.dumps(values, sort_keys=True, indent=2))
 
     def load_values(self):
-        default_values = {k: None for k in self.fields}
+        # read values
         with open(self.data_path, 'r') as f:
             values = json.loads(f.read())
-        return dict(default_values, **values)
 
-    def get_cache_key(self):
+        # init default values
+        default_values = {k: None for k in self.fields}
+        values = dict(default_values, **values)
+
+        # parse values that were converted to json compatible format
+        for name in values:
+            if name not in self.fields or values[name] is None:
+                continue
+            field_type = self.fields[name].type
+
+            if field_type == 'datetime':
+                values[name] = self.fields[name].str2val(values[name])
+            elif field_type == 'tuple':
+                values[name] = tuple(values[name])
+
+        # return
+        return values
+
+    def generate_cache_key(self):
         return "{}-{}".format(self.table.name, self.index_str)
 
     @classmethod
@@ -75,9 +108,7 @@ class Record(object):
 
         # init values
         if not os.path.exists(obj.data_path):
-            default_values = {k: None for k in obj.fields}
-            default_values[obj.table.main_index] = index
-            obj.save_values(default_values)
+            obj.save_values({obj.table.main_index: index})
 
         # update main index
         table.fields[table.main_index].add_to_index(index, index)
@@ -99,26 +130,20 @@ class Record(object):
                 del(values[name])
 
         # write values saved in self.data_path
-        data_values = None
+        data_values = {}
         for name in values:
             if self.fields[name].type in Field.FIELD_TYPES_IN_DATA:
-                data_values = self.load_values()
-                break
-        for name in list(values.keys()):
-            if self.fields[name].type in Field.FIELD_TYPES_IN_DATA:
                 data_values[name] = values[name]
-                if self.fields[name].type == 'datetime' and data_values[name] is not None:
-                    data_values[name] = self.fields[name].val2str(data_values[name])
-        if data_values is not None:
-            self.save_values(data_values)
+        if len(data_values) > 0:
+            old_data_values = self.load_values()
+            self.save_values(dict(old_data_values, **data_values))
 
         # write files
         pass  # TODO
 
         # update cached version
-        cache_key = self.get_cache_key()
-        old_values = self.cache.from_cache(cache_key) or {}
-        self.cache.to_cache(cache_key, dict(old_values, **values))
+        old_values = self.cache.from_cache(self.cache_key) or {}
+        self.cache.to_cache(self.cache_key, dict(old_values, **values))
 
         # update changed indexes
         for name in values:
@@ -136,8 +161,7 @@ class Record(object):
                 field_names.remove(name)
 
         # get cached data
-        cache_key = self.get_cache_key()
-        values = self.cache.from_cache(cache_key) or {}
+        values = self.cache.from_cache(self.cache_key) or {}
 
         # get list of fields that need to be read
         read_field_names = [name for name in field_names if name not in values]
@@ -155,38 +179,25 @@ class Record(object):
         # read values saved in self.data_path
         data_values = None
         for name in list(read_field_names):
-            field_type = self.fields[name].type
-            if field_type not in Field.FIELD_TYPES_IN_DATA:
+            if self.fields[name].type not in Field.FIELD_TYPES_IN_DATA:
                 continue
             if data_values is None:
                 data_values = self.load_values()
-
-            if field_type == 'int' and data_values[name] is not None:
-                values[name] = int(data_values[name])
-            elif field_type == 'float' and data_values[name] is not None:
-                values[name] = float(data_values[name])
-            elif field_type == 'tuple' and data_values[name] is not None:
-                values[name] = tuple(data_values[name])
-            elif field_type == 'datetime' and data_values[name] is not None:
-                values[name] = self.fields[name].str2val(data_values[name])
-            else:
-                values[name] = data_values[name]
-
+            values[name] = data_values[name]
             read_field_names.remove(name)
 
         # read files
         pass  # TODO
 
         # cache data
-        self.cache.to_cache(cache_key, values)
+        self.cache.to_cache(self.cache_key, values)
 
         # return what was requested
         return {k: values[k] for k in field_names}
 
     def delete(self):
         # delete cached version
-        cache_key = self.get_cache_key()
-        self.cache.del_cache(cache_key)
+        self.cache.del_cache(self.cache_key)
         # remove from index
         for name in self.fields:
             if self.fields[name].index:

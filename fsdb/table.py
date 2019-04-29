@@ -17,6 +17,7 @@ _logger = logging.getLogger(__name__)
 
 class Table(object):
 
+    data_fname = sanitize_filename('data.json')
     _deleted = False
 
     def __init__(self, name, database):
@@ -26,7 +27,6 @@ class Table(object):
         self.db_path = self.database.db_path
 
         self.table_path = os.path.join(self.db_path, self.name)
-        self.data_fname = sanitize_filename('data.json')
         self.data_path = os.path.join(self.table_path, self.data_fname)
 
         self.fields = {

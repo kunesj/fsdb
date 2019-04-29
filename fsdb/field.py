@@ -33,7 +33,7 @@ class Field(object):
         self.database = self.table.database
         self.in_data = self.type in self.FIELD_TYPES_IN_DATA  # TODO: use this
         self.index_build = False
-        self.indexed_values = []  # [(value, record_id), ...] sorted by value  # TODO: do I even need this sorted??? 
+        self.indexed_values = []  # [(value, record_id), ...] sorted by value  # TODO: do I even need this sorted???
 
         # validate
         self.validate()
@@ -124,7 +124,7 @@ class Field(object):
                 self.indexed_values.remove(sublist)
                 break
 
-        # add new value and sort
+        # add new value and sort  # TODO: insert into correct position to prevent requiring sorting
         self.indexed_values.append((value, rid))
         self.indexed_values = sorted(self.indexed_values, key=itemgetter(0))
 

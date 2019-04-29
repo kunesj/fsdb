@@ -18,12 +18,13 @@ _logger = logging.getLogger(__name__)
 class Database(object):
     # TODO: wait for one transaction to finish before doing next one
 
+    # data_fname = sanitize_filename('data.json')
+
     def __init__(self, name, root_path):
         self.name = sanitize_filename(name)
         self.root_path = root_path
 
         self.db_path = os.path.join(self.root_path, self.name)
-        # self.data_fname = sanitize_filename('data.json')
         # self.data_path = os.path.join(self.db_path, self.data_fname)
 
         self.tables = {}
@@ -117,6 +118,7 @@ class Database(object):
     def search(self, table_name, domain=None, limit=None):
         table = self.get_table(table_name)
         domain = domain if domain else []
+        limit = limit if (limit and limit >= 0) else None
 
         # validate domain
         for dom in domain:
@@ -136,7 +138,7 @@ class Database(object):
 
         # filter record ids with domain
         if len(domain) == 0:
-            return [Record(rid, table) for rid in table.record_ids[:(limit if limit else -1)]]
+            return [Record(rid, table) for rid in table.record_ids[:limit]]
 
         else:
             records = []
@@ -176,7 +178,7 @@ class Database(object):
                     else:
                         raise FsdbError('Invalid domain! {}'.format(domain))
 
-                # evaluate processed domain
+                # evaluate processed domain  # TODO: test this
                 while len(domain_processed) >= 2:
                     domain_changed = False
                     for i in range(len(domain_processed)-1):
