@@ -62,7 +62,7 @@ class TestFSDB(unittest.TestCase):
             ],
         })
         self.db.create('test_table_datetime', {})
-        self.db.create('test_table_datetime', {})
+        rec_dt2 = self.db.create('test_table_datetime', {}).read()['id']
         self.db.create('test_table_datetime', {})
 
         # reopen database
@@ -88,6 +88,21 @@ class TestFSDB(unittest.TestCase):
 
         records = self.db.search('test_table_datetime', [])
         self.assertEqual(len(records), 3)
+
+        records = self.db.search('test_table_datetime', [('id', '>=', rec_dt2)])
+        self.assertEqual(len(records), 2)
+
+        records = self.db.search('test_table_datetime', [('id', '>', rec_dt2)])
+        self.assertEqual(len(records), 1)
+
+        records = self.db.search('test_table_datetime', [
+            '&',
+            ('id', '!=', rec_dt2),
+            '|',
+            ('id', '<', rec_dt2),
+            ('id', '>', rec_dt2),
+        ])
+        self.assertEqual(len(records), 2)
 
 
 if __name__ == '__main__':

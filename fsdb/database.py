@@ -120,7 +120,7 @@ class Database(object):
         domain = domain if domain else []
         limit = limit if (limit and limit >= 0) else None
 
-        # validate domain
+        # validate domain  # TODO: make better
         for dom in domain:
             if isinstance(dom, str):
                 if dom not in ['&', '|']:
