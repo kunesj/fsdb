@@ -92,21 +92,17 @@ class Table(object):
 
     def load_record_ids(self):
         self.record_ids = []
-        for index in os.listdir(self.table_path):
-            record_path = os.path.join(self.table_path, index)
+        for index_str in os.listdir(self.table_path):
+            record_path = os.path.join(self.table_path, index_str)
             if not os.path.isdir(record_path):
                 continue
+            index = self.fields[self.main_index].str2val(index_str)
             self.record_ids.append(index)
         return self.record_ids
 
     def browse_records(self, ids):
         if isinstance(ids, list):
-            records = []
-            for rid in ids:
-                if rid in self.record_ids:
-                    records.append(Record(rid, self))
-            return records
-
+            return [Record(rid, self) for rid in ids if rid in self.record_ids]
         else:
             return Record(ids, self) if ids in self.record_ids else None
 

@@ -15,7 +15,7 @@ import fsdb
 class TestFSDB(unittest.TestCase):
 
     root_path = None
-    auto_delete = False
+    auto_delete = True
 
     @classmethod
     def setUpClass(cls):
@@ -60,7 +60,9 @@ class TestFSDB(unittest.TestCase):
 
         # test if data was correctly created
         rec1 = self.db.browse('test_table', rec1_id)
+        self.assertIsNotNone(rec1)
         rec2 = self.db.browse('test_table', rec2_id)
+        self.assertIsNotNone(rec2)
         rec1_data = rec1.read()
         rec2_data = rec2.read()
 

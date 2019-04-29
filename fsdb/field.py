@@ -18,10 +18,8 @@ class Field(object):
     # all valid field types
     FIELD_TYPES = FIELD_TYPES_IN_DATA + []
 
-    # indexable field types
-    INDEXABLE_FIELD_TYPES = ['int', 'float', 'datetime']
-
-    DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S.%f'
+    # format used to save and load datetime fields from/to json
+    DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S.%f'  # MUST BE filename compatible!!!!! (Could be used as folder name)
 
     def __init__(self, name, type, table, index=False, unique_index=False, main_index=False):
         # field data
@@ -34,7 +32,8 @@ class Field(object):
         # run variables
         self.table = table
         self.database = self.table.database
-        self.in_data = self.type in self.FIELD_TYPES_IN_DATA
+        self.in_data = self.type in self.FIELD_TYPES_IN_DATA  # TODO: use this
+        self.index_build = False
         self.indexed_values = []  # [(value, record_id), ...] natsorted by value
 
         # validate
@@ -65,8 +64,38 @@ class Field(object):
         if self.type not in self.FIELD_TYPES:
             raise FsdbError('Field "{}" of table "{}" has invalid type "{}"!'.format(self.name, self.table.name, self.type))
 
-        if self.index and self.type not in self.INDEXABLE_FIELD_TYPES:
-            raise FsdbError('Index "{}" of table "{}" has type "{}" that is not indexable!'.format(self.name, self.table.name, self.type))
+    def validate_value(self, val):
+        pass  # TODO
+
+    # to string / from string
+
+    def val2str(self, val):
+        if self.type == 'str':
+            val_str = str(val)
+        elif self.type == 'int':
+            val_str = str(val)
+        elif self.type == 'float':
+            val_str = float(val)
+        elif self.type == 'datetime':
+            val_str = datetime.datetime.strftime(val, self.DATETIME_FORMAT)
+        else:
+            raise FsdbError('Unsupported val2str type "{}"!'.format(self.type))
+        return val_str
+
+    def str2val(self, val_str):
+        if self.type == 'str':
+            val = str(val_str)
+        elif self.type == 'int':
+            val = int(val_str)
+        elif self.type == 'float':
+            val = float(val_str)
+        elif self.type == 'datetime':
+            val = datetime.datetime.strptime(val_str, self.DATETIME_FORMAT)
+        else:
+            raise FsdbError('Unsupported str2val type "{}"!'.format(self.type))
+        return val
+
+    # index
 
     def build_index(self, records=None):
         _logger.info('Building index of field "{}" in table "{}"'.format(self.name, self.table.name))
@@ -80,13 +109,15 @@ class Field(object):
 
         # natsort list of (value, id) by value
         self.indexed_values = natsort.natsorted(self.indexed_values, key=itemgetter(0))
+        self.index_build = True
 
         return self.indexed_values
 
     def add_to_index(self, value, rid):
         if not self.index:
-            _logger.warning('Attempted to add value to index of field that is not index! Ignoring.')
-            return
+            raise FsdbError('Attempted to add value to index of field that is not index! Ignoring.')
+        if not self.index_build:
+            raise FsdbError('Attempted access index that\'s not build yet!')
 
         # remove if already exists
         for sublist in self.indexed_values:
@@ -100,8 +131,9 @@ class Field(object):
 
     def remove_from_index(self, rid):
         if not self.index:
-            _logger.warning('Attempted to remove value from index of field that is not index! Ignoring.')
-            return
+            raise FsdbError('Attempted to remove value from index of field that is not index!')
+        if not self.index_build:
+            raise FsdbError('Attempted access index that\'s not build yet!')
 
         for sublist in self.indexed_values:
             if sublist[1] == rid:
@@ -111,6 +143,8 @@ class Field(object):
     def get_from_index(self, rid):
         if not self.index:
             raise FsdbError('Attempted to get value from index of field that is not index!')
+        if not self.index_build:
+            raise FsdbError('Attempted access index that\'s not build yet!')
 
         for sublist in self.indexed_values:
             if sublist[1] == rid:
@@ -118,13 +152,15 @@ class Field(object):
 
         raise FsdbError('Record ID not found in index!')
 
-    def get_new_index_value(self):
+    # misc
+
+    def get_new_sequence_value(self):
         if not self.index:
             raise FsdbError('Field "{}" of table "{}" is not index!'.format(self.name, self.table.name))
 
         if self.type in ['int', 'float']:
             if len(self.indexed_values) > 0:
-                last_value = float(self.indexed_values[-1][0])
+                last_value = self.indexed_values[-1][0]
             else:
                 last_value = 0
             next_value = last_value + 1.0

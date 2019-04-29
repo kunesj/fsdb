@@ -136,15 +136,12 @@ class Database(object):
 
         # filter record ids with domain
         if len(domain) == 0:
-            if limit is None:
-                record_ids = table.record_ids
-            else:
-                record_ids = table.record_ids[:limit]
+            return [Record(rid, table) for rid in table.record_ids[:(limit if limit else -1)]]
 
         else:
-            record_ids = []
+            records = []
             for rid in table.record_ids:
-                record = None
+                record = Record(rid, table)
 
                 domain_processed = []
                 for dom in domain:
@@ -157,12 +154,7 @@ class Database(object):
                     dom_field, dom_eq, dom_value = tuple(dom)
 
                     # get field value
-                    if table.fields[dom_field].index:
-                        field_value = table.fields[dom_field].get_from_index(rid)
-                    else:
-                        if record is None:
-                            record = Record(rid, table)
-                        field_value = record.read([dom_field, ])[dom_field]
+                    field_value = record.read([dom_field, ])[dom_field]
 
                     # filter record by sub-domain
                     if dom_eq == '=':
@@ -217,12 +209,12 @@ class Database(object):
 
                 # evaluate result
                 if result:
-                    record_ids.append(rid)
-                    if limit is not None and len(record_ids) >= limit:
+                    records.append(record)
+                    if limit is not None and len(records) >= limit:
                         break
 
-        # return records
-        return [Record(rid, table) for rid in record_ids]
+            # return records
+            return records
 
     def delete(self, table_name, domain=None):
         table = self.get_table(table_name)

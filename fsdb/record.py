@@ -5,7 +5,6 @@ import os
 import shutil
 import json
 import copy
-import datetime
 import logging
 
 from .exceptions import FsdbError
@@ -15,19 +14,20 @@ from .field import Field
 _logger = logging.getLogger(__name__)
 
 
-class Record(object):  # TODO: solve index type problems
+class Record(object):
 
     _deleted = False
 
     def __init__(self, index, table):
-        self.index = sanitize_filename(str(index))  # created from main_index field
+        self.index = index
         self.table = table
         self.database = self.table.database
         self.cache = self.database.cache
         self.fields = self.table.fields
         self.table_path = self.table.table_path
 
-        self.record_path = os.path.join(self.table_path, self.index)
+        self.index_str = self.fields[self.table.main_index].val2str(self.index)
+        self.record_path = os.path.join(self.table_path, self.index_str)
         self.data_fname = sanitize_filename('data.json')
         self.data_path = os.path.join(self.record_path, self.data_fname)
 
@@ -53,7 +53,7 @@ class Record(object):  # TODO: solve index type problems
         return dict(default_values, **values)
 
     def get_cache_key(self):
-        return "{}-{}".format(self.table.name, self.index)
+        return "{}-{}".format(self.table.name, self.index_str)
 
     @classmethod
     def create(cls, table, values):
@@ -61,14 +61,13 @@ class Record(object):  # TODO: solve index type problems
             index = values[table.main_index]
             del(values[table.main_index])
         else:
-            index = table.fields[table.main_index].get_new_index_value()
+            index = table.fields[table.main_index].get_new_sequence_value()
 
-        index = sanitize_filename(str(index))
-        if os.path.exists(os.path.join(table.table_path, index)):
+        index_str = table.fields[table.main_index].val2str(index)
+        if os.path.exists(os.path.join(table.table_path, index_str)):
             raise FsdbError('Index must be unique!')
 
         obj = cls(index, table)
-        index = obj.index
 
         # init record directory
         if not os.path.exists(obj.record_path):
@@ -109,7 +108,7 @@ class Record(object):  # TODO: solve index type problems
             if self.fields[name].type in Field.FIELD_TYPES_IN_DATA:
                 data_values[name] = values[name]
                 if self.fields[name].type == 'datetime' and data_values[name] is not None:
-                    data_values[name] = datetime.datetime.strftime(data_values[name], Field.DATETIME_FORMAT)
+                    data_values[name] = self.fields[name].val2str(data_values[name])
         if data_values is not None:
             self.save_values(data_values)
 
@@ -146,6 +145,13 @@ class Record(object):  # TODO: solve index type problems
             # return what was requested
             return {k: values[k] for k in field_names}
 
+        # read values from index (if one exists)
+        for name in list(read_field_names):
+            if not self.fields[name].index or not self.fields[name].index_build:
+                continue
+            values[name] = self.fields[name].get_from_index(self.index)
+            read_field_names.remove(name)
+
         # read values saved in self.data_path
         data_values = None
         for name in list(read_field_names):
@@ -162,7 +168,7 @@ class Record(object):  # TODO: solve index type problems
             elif field_type == 'tuple' and data_values[name] is not None:
                 values[name] = tuple(data_values[name])
             elif field_type == 'datetime' and data_values[name] is not None:
-                values[name] = datetime.datetime.strptime(data_values[name], Field.DATETIME_FORMAT)
+                values[name] = self.fields[name].str2val(data_values[name])
             else:
                 values[name] = data_values[name]
 
