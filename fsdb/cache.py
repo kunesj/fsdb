@@ -9,11 +9,20 @@ _logger = logging.getLogger(__name__)
 
 class Cache(object):
 
-    def __init__(self, cache_size=100*(1024**2)):
-        self.cache_size = cache_size
-        self.cache_size_limit = int(cache_size*1.5)  # when to trigger clean
+    def __init__(self, cache_size=None):
         self.cache = {}
         self.access_list = []
+
+        self.cache_size = 0
+        self.cache_size_limit = 0  # when to trigger clean
+        self.set_cache_size(cache_size if cache_size else 100*(1024**2))
+
+    def set_cache_size(self, cache_size, cache_size_limit=None):
+        self.cache_size = cache_size
+        self.cache_size_limit = max(cache_size, cache_size_limit) if cache_size_limit else int(self.cache_size*1.5)
+
+    def get_cache_size(self):
+        return self.cache_size, self.cache_size_limit
 
     def to_cache(self, key, value):
         # don't cache objects larger then min cache size

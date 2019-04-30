@@ -42,83 +42,52 @@ class Record(object):
         else:
             return object.__getattribute__(self, name)
 
-    def save_values(self, values):
-        # init default values
-        default_values = {k: None for k in self.fields}
-        values = dict(default_values, **copy.deepcopy(values))
-
-        # convert values to json compatible format
-        for name in values:
-            if name not in self.fields or values[name] is None:
-                continue
-            field_type = self.fields[name].type
-
-            if field_type == 'datetime':
-                values[name] = self.fields[name].val2str(values[name])
-            elif field_type == 'tuple':
-                values[name] = list(values[name])
-
-        # write to file
-        with open(self.data_path, 'w') as f:
-            f.write(json.dumps(values, sort_keys=True, indent=2))
-
-    def load_values(self):
-        # read values
-        with open(self.data_path, 'r') as f:
-            values = json.loads(f.read())
-
-        # init default values
-        default_values = {k: None for k in self.fields}
-        values = dict(default_values, **values)
-
-        # parse values that were converted to json compatible format
-        for name in values:
-            if name not in self.fields or values[name] is None:
-                continue
-            field_type = self.fields[name].type
-
-            if field_type == 'datetime':
-                values[name] = self.fields[name].str2val(values[name])
-            elif field_type == 'tuple':
-                values[name] = tuple(values[name])
-
-        # return
-        return values
-
     def generate_cache_key(self):
         return "{}-{}".format(self.table.name, self.index_str)
 
+    # create/update/read/delete
+
     @classmethod
     def create(cls, table, values):
+        _logger.info('CREATE RECORD IN TABLE "{}" SET values={}'.format(table.name, values))
+
+        # get/generate record index/id
         if table.main_index in values:
             index = values[table.main_index]
-            del(values[table.main_index])
         else:
             index = table.fields[table.main_index].get_new_sequence_value()
+        values[table.main_index] = index
 
+        # convert index to string (will be used as folder name)
         index_str = table.fields[table.main_index].val2str(index)
         if os.path.exists(os.path.join(table.table_path, index_str)):
             raise FsdbError('Index must be unique!')
 
+        # create record object
         obj = cls(index, table)
 
         # init record directory
-        if not os.path.exists(obj.record_path):
-            os.makedirs(obj.record_path)
+        os.makedirs(obj.record_path)
 
-        # init values
-        if not os.path.exists(obj.data_path):
-            obj.save_values({obj.table.main_index: index})
+        # save all values
+        data_values = {}
+        for name in values:
+            table.fields[name].write(obj, values[name], data_values)
+        with open(obj.data_path, 'w') as f:
+            data_values = {k: data_values.get(k) for k in table.fields}
+            f.write(json.dumps(data_values, sort_keys=True, indent=2))
 
         # update main index
         table.fields[table.main_index].add_to_index(index, index)
 
-        # update new record with values
-        obj.write(values)
+        # add record to table record ids
+        if obj.index not in table.record_ids:
+            table.record_ids.append(obj.index)
 
         return obj
 
-    def write(self, values):
+    def update(self, values):
+        _logger.info('UPDATE RECORD "{}" IN TABLE "{}" SET values={}'.format(self.index_str, self.table.name, values))
         # changing Index value is forbidden
         if self.table.main_index in values:
             raise FsdbError('Changing main index value is not allowed!')
@@ -129,17 +98,21 @@ class Record(object):
                 _logger.warning('Write to invalid field name "{}" in table "{}"'.format(name, self.table.name))
                 del(values[name])
 
-        # write values saved in self.data_path
+        # save all values
         data_values = {}
         for name in values:
             if self.fields[name].type in Field.FIELD_TYPES_IN_DATA:
-                data_values[name] = values[name]
-        if len(data_values) > 0:
-            old_data_values = self.load_values()
-            self.save_values(dict(old_data_values, **data_values))
+                with open(self.data_path, 'r') as f:
+                    data_values = json.loads(f.read())
+                break
 
-        # write files
-        pass  # TODO
+        for name in values:
+            self.fields[name].write(self, values[name], data_values)
+
+        if len(data_values) > 0:
+            with open(self.data_path, 'w') as f:
+                data_values = {k: data_values.get(k) for k in self.fields}
+                f.write(json.dumps(data_values, sort_keys=True, indent=2))
 
         # update cached version
         old_values = self.cache.from_cache(self.cache_key) or {}
@@ -151,6 +124,7 @@ class Record(object):
                 self.table.fields[name].add_to_index(values[name], self.index)
 
     def read(self, field_names=None):
+        _logger.info('READ RECORD "{}" IN TABLE "{}" GET {}'.format(self.index_str, self.table.name, field_names or 'ALL'))
         if field_names is None:
             field_names = list(self.fields.keys())
 
@@ -169,25 +143,15 @@ class Record(object):
             # return what was requested
             return {k: values[k] for k in field_names}
 
-        # read values from index (if one exists)
-        for name in list(read_field_names):
-            if not self.fields[name].index or not self.fields[name].index_build:
-                continue
-            values[name] = self.fields[name].get_from_index(self.index)
-            read_field_names.remove(name)
-
-        # read values saved in self.data_path
-        data_values = None
-        for name in list(read_field_names):
-            if self.fields[name].type not in Field.FIELD_TYPES_IN_DATA:
-                continue
-            if data_values is None:
-                data_values = self.load_values()
-            values[name] = data_values[name]
-            read_field_names.remove(name)
-
-        # read files
-        pass  # TODO
+        # read values
+        data_values = {}
+        for name in read_field_names:
+            if self.fields[name].type in Field.FIELD_TYPES_IN_DATA:
+                with open(self.data_path, 'r') as f:
+                    data_values = json.loads(f.read())
+                break
+        for name in read_field_names:
+            values[name] = self.fields[name].read(self, data_values)
 
         # cache data
         self.cache.to_cache(self.cache_key, values)
@@ -196,6 +160,7 @@ class Record(object):
         return {k: values[k] for k in field_names}
 
     def delete(self):
+        _logger.info('DELETE RECORD "{}" IN TABLE "{}"'.format(self.index_str, self.table.name))
         # delete cached version
         self.cache.del_cache(self.cache_key)
         # remove from index

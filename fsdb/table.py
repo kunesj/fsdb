@@ -107,7 +107,7 @@ class Table(object):
             return Record(ids, self) if ids in self.record_ids else None
 
     def build_indexes(self):
-        _logger.info('Building indexes for table "{}"'.format(self.name))
+        _logger.debug('Building indexes for table "{}"'.format(self.name))
 
         # get list of fields that are indexes
         index_field_names = []
@@ -127,40 +127,48 @@ class Table(object):
     # create/update/delete
 
     @classmethod
-    def create(cls, database, values):
-        # get table name
-        if 'name' not in values:
-            raise FsdbError('Missing table name value!')
-        table_name = sanitize_filename(values['name'])
-        del(values['name'])
+    def create(cls, database, name, fields):
+        _logger.info('CREATE TABLE "{}" SET fields={}'.format(name, fields))
+
+        # get valid table name
+        table_name = sanitize_filename(name)
 
         # detect if table already exists
         if os.path.exists(os.path.join(database.db_path, table_name)):
-            raise FsdbError('Table "{}" name already exists!'.format(table_name))
+            raise FsdbError('Table "{}" already exists!'.format(table_name))
 
-        # init empty table
+        # create table object
         obj = cls(table_name, database)
+        obj.fields = {}
+        for field_data in fields:
+            obj.fields[field_data['name']] = Field.from_dict(obj, field_data)
+        obj.validate()
+
+        # create table folder and save data
         os.makedirs(obj.table_path)
         obj.save_data()
 
-        # write table values
-        obj.update(values)
+        # load record ids and build indexes (should be instant, since it's a new table)
+        obj.load_record_ids()
+        obj.build_indexes()
+
+        # add to database list of tables
+        database.tables[obj.name] = obj
 
         return obj
 
-    def update(self, values):
-        if 'name' in values:
-            _logger.warning('Attempted to update table name of table "{}". Ignoring.'.format(self.name))
-        if 'fields' in values:
-            self.fields = {}
-            for field_data in values['fields']:
-                self.fields[field_data['name']] = Field.from_dict(self, field_data)
+    def update(self, fields):
+        _logger.info('UPDATE TABLE "{}" SET fields={}'.format(self.name, fields))
+        self.fields = {}
+        for field_data in fields:
+            self.fields[field_data['name']] = Field.from_dict(self, field_data)
         self.validate()
         self.save_data()
         self.load_record_ids()
         self.build_indexes()
 
     def delete(self):
+        _logger.info('DELETE TABLE "{}"'.format(self.name))
         # delete cached records
         self.cache.clear_cache()
         # delete data

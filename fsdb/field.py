@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import datetime
-from operator import itemgetter
 import logging
 
 from .exceptions import FsdbError
@@ -25,15 +24,14 @@ class Field(object):
         self.name = name.strip().lower()
         self.type = type.strip().lower()
         self.index = index or unique_index or main_index  # True if field should be indexed
-        self.unique_index = unique_index or main_index  # If no duplicate values allowed
+        self.unique_index = unique_index or main_index  # If no duplicate values allowed  # TODO
         self.main_index = main_index  # True if field is main index (can be only one)
 
         # run variables
         self.table = table
         self.database = self.table.database
-        self.in_data = self.type in self.FIELD_TYPES_IN_DATA  # TODO: use this
         self.index_build = False
-        self.indexed_values = []  # [(value, record_id), ...] sorted by value  # TODO: do I even need this sorted???
+        self.indexed_values = []  # [(value, record_id), ...] NOT sorted
 
         # validate
         self.validate()
@@ -63,7 +61,54 @@ class Field(object):
         if self.type not in self.FIELD_TYPES:
             raise FsdbError('Field "{}" of table "{}" has invalid type "{}"!'.format(self.name, self.table.name, self.type))
 
-    def validate_value(self, val):
+    # read/write
+
+    def read(self, record, data_values):
+        """
+        :param record: Record object to read from
+        :param data_values: "pointer" to dict with values read from data.json
+        :return: value
+        """
+        # read value from index
+        if self.index and self.index_build:
+            return self.get_value_from_index(record.index)
+
+        # read values saved in self.data_path
+        if self.type in Field.FIELD_TYPES_IN_DATA:
+            value = data_values.get(self.name)
+            if value is None:
+                return value
+
+            if self.type == 'datetime':
+                return self.str2val(value)
+            elif self.type == 'tuple':
+                return tuple(value)
+            else:
+                return value
+
+        # read files
+        # TODO
+
+    def write(self, record, value, data_values):
+        """
+        :param record: Record object to write to
+        :param value: new value
+        :param data_values: "pointer" to dict with values that will be written to data.json
+        :return:
+        """
+        # write values saved in self.data_path
+        if self.type in Field.FIELD_TYPES_IN_DATA:
+            if value is None:
+                data_values[self.name] = value
+
+            if self.type == 'datetime':
+                data_values[self.name] = self.val2str(value)
+            elif self.type == 'tuple':
+                data_values[self.name] = list(value)
+            else:
+                data_values[self.name] = value
+
+        # write files
         pass  # TODO
 
     # to string / from string
@@ -97,7 +142,7 @@ class Field(object):
     # index
 
     def build_index(self, records=None):
-        _logger.info('Building index of field "{}" in table "{}"'.format(self.name, self.table.name))
+        _logger.debug('Building index of field "{}" in table "{}"'.format(self.name, self.table.name))
         if records is None:
             records = self.table.browse_records(self.table.record_ids)
 
@@ -105,9 +150,6 @@ class Field(object):
         self.indexed_values = []
         for rec in records:
             self.indexed_values.append((rec.read([self.name])[self.name], rec.index))
-
-        # sort list of (value, id) by value
-        self.indexed_values = sorted(self.indexed_values, key=itemgetter(0))
         self.index_build = True
 
         return self.indexed_values
@@ -124,9 +166,8 @@ class Field(object):
                 self.indexed_values.remove(sublist)
                 break
 
-        # add new value and sort  # TODO: insert into correct position to prevent requiring sorting
+        # add new value
         self.indexed_values.append((value, rid))
-        self.indexed_values = sorted(self.indexed_values, key=itemgetter(0))
 
     def remove_from_index(self, rid):
         if not self.index:
@@ -139,7 +180,7 @@ class Field(object):
                 self.indexed_values.remove(sublist)
                 break
 
-    def get_from_index(self, rid):
+    def get_value_from_index(self, rid):
         if not self.index:
             raise FsdbError('Attempted to get value from index of field that is not index!')
         if not self.index_build:
@@ -150,6 +191,33 @@ class Field(object):
                 return sublist[0]
 
         raise FsdbError('Record ID not found in index!')
+
+    def search_index(self, eq, value):  # TODO: not used anywhere right now
+        """
+        :param eq: =, !=, in, not in, >, >=, <, <=, ...
+        :param value: value or list of values
+        :return: list of record ids
+        """
+        if eq == '=':
+            items = filter(lambda x: x[0] == value, self.indexed_values)
+        elif eq == '!=':
+            items = filter(lambda x: x[0] != value, self.indexed_values)
+        elif eq == 'in':
+            items = filter(lambda x: x[0] in value, self.indexed_values)
+        elif eq == 'not in':
+            items = filter(lambda x: x[0] not in value, self.indexed_values)
+        elif eq == '>':
+            items = filter(lambda x: x[0] > value, self.indexed_values)
+        elif eq == '>=':
+            items = filter(lambda x: x[0] >= value, self.indexed_values)
+        elif eq == '<':
+            items = filter(lambda x: x[0] < value, self.indexed_values)
+        elif eq == '<=':
+            items = filter(lambda x: x[0] <= value, self.indexed_values)
+        else:
+            raise NotImplementedError
+
+        return map(lambda x: x[1], items)
 
     # misc
 
