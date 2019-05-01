@@ -42,11 +42,11 @@ class TestFSDB(unittest.TestCase):
         rec1_id = self.fsdb.create_record('test_table', {
             'val1': 'test_val1-1',
             'val2': datetime.datetime(2000, 1, 1),
-        }).index
+        }).id
         rec2_id = self.fsdb.create_record('test_table', {
             'val1': 'test_val1-2',
             'val2': datetime.datetime(2000, 1, 2),
-        }).index
+        }).id
 
         self.fsdb.create_table(
             name='test_table_datetime',
@@ -172,8 +172,8 @@ class TestFSDB(unittest.TestCase):
         f2 = {'name': 'f2.txt', 'data': 'TEST TEXT 2'.encode('utf-8')}
 
         # create record + test value
-        index = self.fsdb.create_record('test_table', {'file': f1}).index
-        rec = self.fsdb.browse_records('test_table', index)
+        id = self.fsdb.create_record('test_table', {'file': f1}).id
+        rec = self.fsdb.browse_records('test_table', id)
         self._assertFileEqual(f1, rec.read()['file'])
 
         # write record + test that value changed
@@ -213,8 +213,8 @@ class TestFSDB(unittest.TestCase):
         fl2 = [f2, f3]
 
         # create record + test value
-        index = self.fsdb.create_record('test_table', {'files': fl1}).index
-        rec = self.fsdb.browse_records('test_table', index)
+        id = self.fsdb.create_record('test_table', {'files': fl1}).id
+        rec = self.fsdb.browse_records('test_table', id)
         self._assertFileListEqual(fl1, rec.read()['files'])
 
         # write record + test that value changed

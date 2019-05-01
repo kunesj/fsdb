@@ -9,6 +9,7 @@ import os
 import json
 import copy
 import shutil
+import datetime
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -97,31 +98,52 @@ class Table(object):
 
     def load_record_ids(self):
         self.record_ids = []
-        for index_str in os.listdir(self.table_path):
-            record_path = os.path.join(self.table_path, index_str)
+        for id_str in os.listdir(self.table_path):
+            record_path = os.path.join(self.table_path, id_str)
             if not os.path.isdir(record_path):
                 continue
-            index = self.fields[self.main_index].str2val(index_str)
-            self.record_ids.append(index)
+            id = self.fields[self.main_index].str2val(id_str)
+            self.record_ids.append(id)
         return self.record_ids
 
-    def build_indexes(self):  # TODO: record_ids from index (or opposite)
+    def build_indexes(self):
         _logger.debug('Building indexes for table "{}"'.format(self.name))
+
+        # build id index
+        self.fields[self.main_index].build_index()
 
         # get list of fields that are indexes
         index_field_names = []
         for name in self.fields:
+            if name == self.main_index:
+                continue
             if self.fields[name].index:
                 index_field_names.append(name)
 
-        # prefetch data to cache
-        records = self.browse_records(self.record_ids)
-        for rec in records[:1000]:
-            rec.read(index_field_names)
-
         # build indexes
-        for name in index_field_names:
-            self.fields[name].build_index(records)
+        if len(index_field_names) > 0:
+            # prefetch data to cache
+            records = self.browse_records(self.record_ids)
+            for rec in records[:1000]:
+                rec.read(index_field_names)
+
+            # build indexes
+            for name in index_field_names:
+                self.fields[name].build_index(records)
+
+    def get_new_id(self):
+        main_index_field = self.fields[self.main_index]
+
+        if main_index_field.type in ['int', 'float']:
+            last_value = max(self.record_ids) if len(self.record_ids) > 0 else 0
+            next_value = last_value + 1.0
+            return int(next_value) if main_index_field.type == 'int' else float(next_value)
+
+        elif main_index_field.type == 'datetime':
+            return datetime.datetime.now()
+
+        else:
+            raise FsdbError('Unable to generate new ID for table "{}"!'.format(self.name))
 
     # records - browse/search
 

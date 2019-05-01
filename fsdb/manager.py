@@ -34,6 +34,9 @@ class Manager(object):  # TODO: wait for one transaction to finish before doing 
         self.root_path = root_path
         self.database = None
 
+        # Used to detect
+        self.transaction_ongoing = False
+
     # Database
 
     def is_database(self, name):

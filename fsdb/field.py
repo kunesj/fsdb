@@ -86,7 +86,7 @@ class Field(object):
         """
         # read value from index
         if self.index and self.index_build:
-            return self.get_value_from_index(record.index)
+            return self.get_value_from_index(record.id)
 
         # read
         if self.type == 'file':
@@ -243,22 +243,33 @@ class Field(object):
 
     def build_index(self, records=None):
         _logger.debug('Building index of field "{}" in table "{}"'.format(self.name, self.table.name))
-        if records is None:
-            records = self.table.browse_records(self.table.record_ids)
 
-        # create list of (value, id)
-        self.indexed_values = []
-        for rec in records:
-            self.indexed_values.append((rec.read([self.name])[self.name], rec.index))
-        self.index_build = True
+        # fake build main index
+        if self.name == self.table.main_index:
+            self.indexed_values = []
+            self.index_build = True
 
-        return self.indexed_values
+        # build other indexes
+        else:
+            # get list of records if not given
+            if records is None:
+                records = self.table.browse_records(self.table.record_ids)
+
+            # create list of (value, id)
+            self.indexed_values = []
+            for rec in records:
+                self.indexed_values.append((rec.read([self.name])[self.name], rec.id))
+            self.index_build = True
 
     def add_to_index(self, value, rid):
         if not self.index:
             raise FsdbError('Attempted to add value to index of field that is not index! Ignoring.')
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
+
+        # main index - using self.table.record_ids as index
+        if self.name == self.table.main_index:
+            return  # should already be added
 
         # remove if already exists
         for sublist in self.indexed_values:
@@ -275,6 +286,11 @@ class Field(object):
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
 
+        # main index - using self.table.record_ids as index
+        if self.name == self.table.main_index:
+            return  # should already be removed
+
+        # other indexes
         for sublist in self.indexed_values:
             if sublist[1] == rid:
                 self.indexed_values.remove(sublist)
@@ -286,6 +302,12 @@ class Field(object):
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
 
+        # main index - using self.table.record_ids as index
+        if self.name == self.table.main_index:
+            if rid in self.table.record_ids:
+                return rid
+
+        # other indexes
         for sublist in self.indexed_values:
             if sublist[1] == rid:
                 return sublist[0]
@@ -298,43 +320,28 @@ class Field(object):
         :param value: value or list of values
         :return: list of record ids
         """
+        if self.name == self.table.main_index:
+            indexed_values = list(zip(self.table.record_ids, self.table.record_ids))
+        else:
+            indexed_values = self.indexed_values
+
         if eq == '=':
-            items = filter(lambda x: x[0] == value, self.indexed_values)
+            items = filter(lambda x: x[0] == value, indexed_values)
         elif eq == '!=':
-            items = filter(lambda x: x[0] != value, self.indexed_values)
+            items = filter(lambda x: x[0] != value, indexed_values)
         elif eq == 'in':
-            items = filter(lambda x: x[0] in value, self.indexed_values)
+            items = filter(lambda x: x[0] in value, indexed_values)
         elif eq == 'not in':
-            items = filter(lambda x: x[0] not in value, self.indexed_values)
+            items = filter(lambda x: x[0] not in value, indexed_values)
         elif eq == '>':
-            items = filter(lambda x: x[0] > value, self.indexed_values)
+            items = filter(lambda x: x[0] > value, indexed_values)
         elif eq == '>=':
-            items = filter(lambda x: x[0] >= value, self.indexed_values)
+            items = filter(lambda x: x[0] >= value, indexed_values)
         elif eq == '<':
-            items = filter(lambda x: x[0] < value, self.indexed_values)
+            items = filter(lambda x: x[0] < value, indexed_values)
         elif eq == '<=':
-            items = filter(lambda x: x[0] <= value, self.indexed_values)
+            items = filter(lambda x: x[0] <= value, indexed_values)
         else:
             raise NotImplementedError
 
         return map(lambda x: x[1], items)
-
-    # misc
-
-    def get_new_sequence_value(self):
-        if not self.index:
-            raise FsdbError('Field "{}" of table "{}" is not index!'.format(self.name, self.table.name))
-
-        if self.type in ['int', 'float']:
-            if len(self.indexed_values) > 0:
-                last_value = self.indexed_values[-1][0]
-            else:
-                last_value = 0
-            next_value = last_value + 1.0
-            return int(next_value) if self.type == 'int' else float(next_value)
-
-        elif self.type == 'datetime':
-            return datetime.datetime.now()
-
-        else:
-            raise FsdbError('Unsupported index type "{}" of field "{}" in table "{}"!'.format(self.type, self.name, self.table.name))
