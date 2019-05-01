@@ -7,7 +7,7 @@ import copy
 import shutil
 import logging
 
-from .exceptions import FsdbError
+from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed, FsdbObjectNotFound
 from .tools import sanitize_filename
 from .field import Field
 from .record import Record
@@ -18,6 +18,7 @@ _logger = logging.getLogger(__name__)
 class Table(object):
 
     data_fname = sanitize_filename('data.json')
+    database = None
     _deleted = False
 
     def __init__(self, name, database):
@@ -41,10 +42,15 @@ class Table(object):
             self.build_indexes()
 
     def __getattribute__(self, name):
+        # check if table is deleted
         if object.__getattribute__(self, '_deleted'):
-            FsdbError('Can\'t access deleted tables!')
-        else:
-            return object.__getattribute__(self, name)
+            raise FsdbObjectDeleted('Can\'t access deleted table objects!')
+        # check if database is closed
+        database = object.__getattribute__(self, 'database')
+        if database and object.__getattribute__(database, '_closed'):
+            raise FsdbDatabaseClosed
+        # return attribute
+        return object.__getattribute__(self, name)
 
     def save_data(self):
         # validate
@@ -100,12 +106,6 @@ class Table(object):
             self.record_ids.append(index)
         return self.record_ids
 
-    def browse_records(self, ids):
-        if isinstance(ids, list):
-            return [Record(rid, self) for rid in ids if rid in self.record_ids]
-        else:
-            return Record(ids, self) if ids in self.record_ids else None
-
     def build_indexes(self):
         _logger.debug('Building indexes for table "{}"'.format(self.name))
 
@@ -117,12 +117,122 @@ class Table(object):
 
         # prefetch data to cache
         records = self.browse_records(self.record_ids)
-        for rec in records[:10000]:
+        for rec in records[:1000]:
             rec.read(index_field_names)
 
         # build indexes
         for name in index_field_names:
             self.fields[name].build_index(records)
+
+    # records - browse/search
+
+    def browse_records(self, ids):
+        if isinstance(ids, list):
+            return [Record(rid, self) for rid in ids if rid in self.record_ids]
+        else:
+            return Record(ids, self) if ids in self.record_ids else None
+
+    def search_records(self, domain=None, limit=None):
+        domain = domain if domain else []
+        limit = limit if (limit and limit >= 0) else None
+
+        # validate domain  # TODO: make better
+        for dom in domain:
+            if isinstance(dom, str):
+                if dom not in ['&', '|']:
+                    FsdbError('Invalid domain logic operator "{}"! Only "&" and "|" are allowed.'.format(dom))
+
+            else:
+                dom_field, dom_eq, dom_value = tuple(dom)
+                if dom_field not in self.fields:
+                    FsdbError('Invalid field name "{}" for table "{}"!'.format(dom_field, self.name))
+                if dom_field != self.main_index:
+                    _logger.warning('Searching by field "{}" will be very slow and resource intensive, '
+                                    'because it\'s not index!'.format(dom_field))
+                if dom_eq in ['in', 'not in'] and not isinstance(dom_value, list):
+                    FsdbError('Domain with \'in\' or \'not in\' must have value of type list!')
+
+        # if emjpty domain return all records
+        if len(domain) == 0:
+            return [Record(rid, self) for rid in self.record_ids[:limit]]
+
+        # filter record ids with domain
+        records = []
+        for rid in self.record_ids:
+            record = Record(rid, self)
+
+            domain_processed = []
+            for dom in domain:
+                # & or |
+                if isinstance(dom, str):
+                    domain_processed.append(dom)
+                    continue
+
+                # get sub-domain
+                dom_field, dom_eq, dom_value = tuple(dom)
+
+                # get field value
+                field_value = record.read([dom_field, ])[dom_field]
+
+                # filter record by sub-domain
+                if dom_eq == '=':
+                    domain_processed.append(field_value == dom_value)
+                elif dom_eq == '!=':
+                    domain_processed.append(field_value != dom_value)
+                elif dom_eq == 'in':
+                    domain_processed.append(field_value in dom_value)
+                elif dom_eq == 'not in':
+                    domain_processed.append(field_value not in dom_value)
+                elif dom_eq == '>':
+                    domain_processed.append(field_value > dom_value)
+                elif dom_eq == '>=':
+                    domain_processed.append(field_value >= dom_value)
+                elif dom_eq == '<':
+                    domain_processed.append(field_value < dom_value)
+                elif dom_eq == '<=':
+                    domain_processed.append(field_value <= dom_value)
+                else:
+                    raise FsdbError('Invalid domain! {}'.format(domain))
+
+            # evaluate processed domain  # TODO: test this
+            while len(domain_processed) >= 2:
+                domain_changed = False
+                for i in range(len(domain_processed)-1):
+                    if isinstance(domain_processed[i], bool) and isinstance(domain_processed[i+1], bool):
+                        op = domain_processed[i-1] if i != 0 else '&'
+                        if op == '&':
+                            out = domain_processed[i] and domain_processed[i+1]
+                        elif op == '|':
+                            out = domain_processed[i] or domain_processed[i+1]
+                        else:
+                            raise FsdbError('Invalid processed domain! {}'.format(domain_processed))
+
+                        if i == 0:
+                            domain_processed.pop(i+1)
+                            domain_processed[i] = out
+                        else:
+                            domain_processed.pop(i+1)
+                            domain_processed[i-1] = out
+                            domain_processed.pop(i)
+
+                        domain_changed = True
+                        break
+
+                if not domain_changed:
+                    break
+
+            if len(domain_processed) > 1:
+                raise FsdbError('Invalid processed domain! {}'.format(domain_processed))
+            result = bool(domain_processed[0])
+
+            # evaluate result
+            if result:
+                records.append(record)
+                if limit is not None and len(records) >= limit:
+                    break
+
+        # return records
+        return records
 
     # create/update/delete
 
@@ -132,6 +242,8 @@ class Table(object):
 
         # get valid table name
         table_name = sanitize_filename(name)
+        if table_name != name:
+            raise FsdbError('Name "{}" is not valid table name!'.format(name))
 
         # detect if table already exists
         if os.path.exists(os.path.join(database.db_path, table_name)):
@@ -170,8 +282,9 @@ class Table(object):
     def delete(self):
         _logger.info('DELETE TABLE "{}"'.format(self.name))
         # delete cached records
-        self.cache.clear_cache()
+        self.cache.clear()
         # delete data
-        shutil.rmtree(self.table_path)
+        if os.path.exists(self.table_path):
+            shutil.rmtree(self.table_path)
         # mark object as deleted
         self._deleted = True

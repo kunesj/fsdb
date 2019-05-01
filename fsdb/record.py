@@ -4,10 +4,9 @@
 import os
 import shutil
 import json
-import copy
 import logging
 
-from .exceptions import FsdbError
+from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed
 from .tools import sanitize_filename
 from .field import Field
 
@@ -17,6 +16,7 @@ _logger = logging.getLogger(__name__)
 class Record(object):
 
     data_fname = sanitize_filename('data.json')
+    database = None
     _deleted = False
 
     def __init__(self, index, table):
@@ -34,13 +34,15 @@ class Record(object):
         self.cache_key = self.generate_cache_key()
 
     def __getattribute__(self, name):
-        table = object.__getattribute__(self, 'table')
-        table_deleted = object.__getattribute__(table, '_deleted') if table else True
-        record_deleted = object.__getattribute__(self, '_deleted')
-        if table_deleted or record_deleted:
-            FsdbError('Can\'t access deleted records!')
-        else:
-            return object.__getattribute__(self, name)
+        # check if record is deleted
+        if object.__getattribute__(self, '_deleted'):
+            raise FsdbObjectDeleted('Can\'t access deleted record objects!')
+        # check if database is closed
+        database = object.__getattribute__(self, 'database')
+        if database and object.__getattribute__(database, '_closed'):
+            raise FsdbDatabaseClosed
+        # return attribute
+        return object.__getattribute__(self, name)
 
     def generate_cache_key(self):
         return "{}-{}".format(self.table.name, self.index_str)
@@ -167,7 +169,11 @@ class Record(object):
         for name in self.fields:
             if self.fields[name].index:
                 self.table.fields[name].remove_from_index(self.index)
+        # remove from table list of ids
+        if self.index in self.table.record_ids:
+            self.table.record_ids.remove(self.index)
         # delete data
-        shutil.rmtree(self.record_path)
+        if os.path.exists(self.record_path):
+            shutil.rmtree(self.record_path)
         # mark object as deleted
         self._deleted = True

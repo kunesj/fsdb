@@ -4,12 +4,14 @@
 import datetime
 import logging
 
-from .exceptions import FsdbError
+from .exceptions import FsdbError, FsdbDatabaseClosed, FsdbObjectNotFound
 
 _logger = logging.getLogger(__name__)
 
 
 class Field(object):
+
+    database = None
 
     # all field types that should be saved in json file in data_path of record
     FIELD_TYPES_IN_DATA = ['bool', 'str', 'int', 'float', 'list', 'tuple', 'dict', 'datetime']
@@ -35,6 +37,14 @@ class Field(object):
 
         # validate
         self.validate()
+
+    def __getattribute__(self, name):
+        # check if database is closed
+        database = object.__getattribute__(self, 'database')
+        if database and object.__getattribute__(database, '_closed'):
+            raise FsdbDatabaseClosed
+        # return attribute
+        return object.__getattribute__(self, name)
 
     def to_dict(self):
         data = {
@@ -190,7 +200,7 @@ class Field(object):
             if sublist[1] == rid:
                 return sublist[0]
 
-        raise FsdbError('Record ID not found in index!')
+        raise FsdbObjectNotFound('Record ID not found in index!')
 
     def search_index(self, eq, value):  # TODO: not used anywhere right now
         """
