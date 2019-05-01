@@ -87,9 +87,15 @@ class Table(object):
     def load_record_ids(self):
         self.record_ids = []
         for id_str in os.listdir(self.table_path):
+            # check if folder is valid record, if not delete it
             record_path = os.path.join(self.table_path, id_str)
+            data_path = os.path.join(self.table_path, id_str, Record.data_fname)
             if not os.path.isdir(record_path):
                 continue
+            if not os.path.isfile(data_path) or not os.path.exists(data_path):
+                shutil.rmtree(record_path)
+                continue
+            # parse id and add to list of ids
             id = self.fields['id'].str2val(id_str)
             self.record_ids.append(id)
         return self.record_ids

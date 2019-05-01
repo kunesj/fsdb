@@ -156,7 +156,7 @@ class Field(object):
                 return
 
             # validate new value
-            if not isinstance(value, dict) or not value.get('name') or not value.get('data'):
+            if not isinstance(value, dict) or not value.get('name') or value.get('data') is None:
                 raise FsdbError('Invalid file field value!')
             if not isinstance(value['data'], bytes):
                 raise FsdbError('File data must be bytes type!')
