@@ -101,20 +101,15 @@ class Record(object):
                 del(values[name])
 
         # save all values
-        data_values = {}
-        for name in values:
-            if self.fields[name].type in Field.FIELD_TYPES_IN_DATA:
-                with open(self.data_path, 'r') as f:
-                    data_values = json.loads(f.read())
-                break
+        with open(self.data_path, 'r') as f:
+            data_values = json.loads(f.read())
 
         for name in values:
             self.fields[name].write(self, values[name], data_values)
 
-        if len(data_values) > 0:
-            with open(self.data_path, 'w') as f:
-                data_values = {k: data_values.get(k) for k in self.fields}
-                f.write(json.dumps(data_values, sort_keys=True, indent=2))
+        with open(self.data_path, 'w') as f:
+            data_values = {k: data_values.get(k) for k in self.fields}
+            f.write(json.dumps(data_values, sort_keys=True, indent=2))
 
         # update cached version
         old_values = self.cache.from_cache(self.cache_key) or {}
@@ -146,12 +141,8 @@ class Record(object):
             return {k: values[k] for k in field_names}
 
         # read values
-        data_values = {}
-        for name in read_field_names:
-            if self.fields[name].type in Field.FIELD_TYPES_IN_DATA:
-                with open(self.data_path, 'r') as f:
-                    data_values = json.loads(f.read())
-                break
+        with open(self.data_path, 'r') as f:
+            data_values = json.loads(f.read())
         for name in read_field_names:
             values[name] = self.fields[name].read(self, data_values)
 
