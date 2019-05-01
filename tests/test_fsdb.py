@@ -33,7 +33,7 @@ class TestFSDB(unittest.TestCase):
         self.fsdb.create_table(
             name='test_table',
             fields=[
-                {'name': 'id', 'type': 'int', 'main_index': True, },
+                {'name': 'id', 'type': 'int', 'primary_index': True, },
                 {'name': 'val1', 'type': 'str', },
                 {'name': 'val2', 'type': 'datetime', },
                 {'name': 'val3', 'type': 'list', },
@@ -51,7 +51,7 @@ class TestFSDB(unittest.TestCase):
         self.fsdb.create_table(
             name='test_table_datetime',
             fields=[
-                {'name': 'id', 'type': 'datetime', 'main_index': True, },
+                {'name': 'id', 'type': 'datetime', 'primary_index': True, },
             ]
         )
         self.fsdb.create_record('test_table_datetime', {})
@@ -114,7 +114,7 @@ class TestFSDB(unittest.TestCase):
         db = self.fsdb.database
         tbl = self.fsdb.create_table(
             name='test_table',
-            fields=[{'name': 'id', 'type': 'int', 'main_index': True, }, ]
+            fields=[{'name': 'id', 'type': 'int', 'primary_index': True, }, ]
         )
         rec = self.fsdb.create_record('test_table', {})
 
@@ -131,7 +131,7 @@ class TestFSDB(unittest.TestCase):
         db = self.fsdb.database
         tbl = self.fsdb.create_table(
             name='test_table',
-            fields=[{'name': 'id', 'type': 'int', 'main_index': True, }, ]
+            fields=[{'name': 'id', 'type': 'int', 'primary_index': True, }, ]
         )
         rec = self.fsdb.create_record('test_table', {})
 
@@ -164,7 +164,7 @@ class TestFSDB(unittest.TestCase):
         self.fsdb.create_table(
             name='test_table',
             fields=[
-                {'name': 'id', 'type': 'int', 'main_index': True, },
+                {'name': 'id', 'type': 'int', 'primary_index': True, },
                 {'name': 'file', 'type': 'file', },
             ]
         )
@@ -202,7 +202,7 @@ class TestFSDB(unittest.TestCase):
         self.fsdb.create_table(
             name='test_table',
             fields=[
-                {'name': 'id', 'type': 'int', 'main_index': True, },
+                {'name': 'id', 'type': 'int', 'primary_index': True, },
                 {'name': 'files', 'type': 'file_list', },
             ]
         )

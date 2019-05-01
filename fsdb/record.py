@@ -25,7 +25,7 @@ class Record(object):
         self.fields = self.table.fields
         self.table_path = self.table.table_path
 
-        self.id_str = self.fields[self.table.main_index].val2str(self.id)
+        self.id_str = self.fields[self.table.primary_index].val2str(self.id)
         self.record_path = os.path.join(self.table_path, self.id_str)
         self.data_path = os.path.join(self.record_path, self.data_fname)
 
@@ -52,14 +52,14 @@ class Record(object):
         _logger.info('CREATE RECORD IN TABLE "{}" SET values={}'.format(table.name, values))
 
         # get/generate record id
-        if table.main_index in values:
-            id = values[table.main_index]
+        if table.primary_index in values:
+            id = values[table.primary_index]
         else:
             id = table.get_new_id()
-        values[table.main_index] = id
+        values[table.primary_index] = id
 
         # convert index to string (will be used as folder name)
-        index_str = table.fields[table.main_index].val2str(id)
+        index_str = table.fields[table.primary_index].val2str(id)
         if os.path.exists(os.path.join(table.table_path, index_str)):
             raise FsdbError('Index must be unique!')
 
@@ -77,8 +77,8 @@ class Record(object):
             data_values = {k: data_values.get(k) for k in table.fields}
             f.write(json.dumps(data_values, sort_keys=True, indent=2))
 
-        # update main index
-        table.fields[table.main_index].add_to_index(id, id)
+        # update primary index
+        table.fields[table.primary_index].add_to_index(id, id)
 
         # add record to table record ids
         if obj.id not in table.record_ids:
@@ -89,8 +89,8 @@ class Record(object):
     def write(self, values):
         _logger.info('UPDATE RECORD "{}" IN TABLE "{}" SET values={}'.format(self.id_str, self.table.name, values))
         # changing Index value is forbidden
-        if self.table.main_index in values:
-            raise FsdbError('Changing main index value is not allowed!')
+        if self.table.primary_index in values:
+            raise FsdbError('Changing primary index value is not allowed!')
 
         # detect invalid field names
         for name in values:

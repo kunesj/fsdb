@@ -31,9 +31,9 @@ class Table(object):
         self.data_path = os.path.join(self.table_path, self.data_fname)
 
         self.fields = {
-            'id': Field('id', 'int', self, index=True, main_index=True)
+            'id': Field('id', 'int', self, index=True, primary_index=True)
         }
-        self.main_index = 'id'  # used to name record folders (parsed from self.fields at load_data())
+        self.primary_index = 'id'  # used to name record folders (parsed from self.fields at load_data())
         self.record_ids = []  # NOT sorted
 
         if os.path.exists(self.data_path):
@@ -76,25 +76,25 @@ class Table(object):
         for field_data in data['fields']:
             self.fields[field_data['name']] = Field.from_dict(self, field_data)
 
-        # parse main index
+        # parse primary index
         for name in self.fields:
-            if self.fields[name].main_index:
-                self.main_index = self.fields[name].name
+            if self.fields[name].primary_index:
+                self.primary_index = self.fields[name].name
                 break
 
         # validate
         self.validate()
 
     def validate(self):
-        # one and only one main index
-        main_index_found = False
+        # one and only one primary index
+        primary_index_found = False
         for name in self.fields:
-            if self.fields[name].main_index and main_index_found:
-                FsdbError('Only one main index allowed for table "{}"!'.format(self.name))
-            elif self.fields[name].main_index:
-                main_index_found = True
-        if not main_index_found:
-            FsdbError('No main index defined for table "{}"!'.format(self.name))
+            if self.fields[name].primary_index and primary_index_found:
+                FsdbError('Only one primary index allowed for table "{}"!'.format(self.name))
+            elif self.fields[name].primary_index:
+                primary_index_found = True
+        if not primary_index_found:
+            FsdbError('No primary index defined for table "{}"!'.format(self.name))
 
     def load_record_ids(self):
         self.record_ids = []
@@ -102,7 +102,7 @@ class Table(object):
             record_path = os.path.join(self.table_path, id_str)
             if not os.path.isdir(record_path):
                 continue
-            id = self.fields[self.main_index].str2val(id_str)
+            id = self.fields[self.primary_index].str2val(id_str)
             self.record_ids.append(id)
         return self.record_ids
 
@@ -110,12 +110,12 @@ class Table(object):
         _logger.debug('Building indexes for table "{}"'.format(self.name))
 
         # build id index
-        self.fields[self.main_index].build_index()
+        self.fields[self.primary_index].build_index()
 
         # get list of fields that are indexes
         index_field_names = []
         for name in self.fields:
-            if name == self.main_index:
+            if name == self.primary_index:
                 continue
             if self.fields[name].index:
                 index_field_names.append(name)
@@ -132,14 +132,14 @@ class Table(object):
                 self.fields[name].build_index(records)
 
     def get_new_id(self):
-        main_index_field = self.fields[self.main_index]
+        primary_index_field = self.fields[self.primary_index]
 
-        if main_index_field.type in ['int', 'float']:
+        if primary_index_field.type in ['int', 'float']:
             last_value = max(self.record_ids) if len(self.record_ids) > 0 else 0
             next_value = last_value + 1.0
-            return int(next_value) if main_index_field.type == 'int' else float(next_value)
+            return int(next_value) if primary_index_field.type == 'int' else float(next_value)
 
-        elif main_index_field.type == 'datetime':
+        elif primary_index_field.type == 'datetime':
             return datetime.datetime.now()
 
         else:
@@ -167,7 +167,7 @@ class Table(object):
                 dom_field, dom_eq, dom_value = tuple(dom)
                 if dom_field not in self.fields:
                     FsdbError('Invalid field name "{}" for table "{}"!'.format(dom_field, self.name))
-                if dom_field != self.main_index:
+                if dom_field != self.primary_index:
                     _logger.warning('Searching by field "{}" will be very slow and resource intensive, '
                                     'because it\'s not index!'.format(dom_field))
                 if dom_eq in ['in', 'not in'] and not isinstance(dom_value, list):

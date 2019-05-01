@@ -26,13 +26,13 @@ class Field(object):
     # format used to save and load datetime fields from/to json
     DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S.%f'  # MUST BE filename compatible!!!!! (Could be used as folder name)
 
-    def __init__(self, name, type, table, index=False, unique_index=False, main_index=False):
+    def __init__(self, name, type, table, index=False, unique_index=False, primary_index=False):
         # field data
         self.name = name.strip().lower()
         self.type = type.strip().lower()
-        self.index = index or unique_index or main_index  # True if field should be indexed
-        self.unique_index = unique_index or main_index  # If no duplicate values allowed  # TODO
-        self.main_index = main_index  # True if field is main index (can be only one)
+        self.index = index or unique_index or primary_index  # True if field should be indexed
+        self.unique_index = unique_index or primary_index  # If no duplicate values allowed  # TODO
+        self.primary_index = primary_index  # True if field is primary index (can be only one)
 
         # run variables
         self.table = table
@@ -60,16 +60,16 @@ class Field(object):
             data['index'] = self.index
         if self.unique_index:
             data['unique_index'] = self.unique_index
-        if self.main_index:
-            data['main_index'] = self.main_index
+        if self.primary_index:
+            data['primary_index'] = self.primary_index
         return data
 
     @classmethod
     def from_dict(cls, table, data):
         obj = cls(data['name'], data['type'], table)
-        obj.index = data.get('index') or data.get('unique_index') or data.get('main_index')
-        obj.unique_index = data.get('unique_index') or data.get('main_index')
-        obj.main_index = data.get('main_index')
+        obj.index = data.get('index') or data.get('unique_index') or data.get('primary_index')
+        obj.unique_index = data.get('unique_index') or data.get('primary_index')
+        obj.primary_index = data.get('primary_index')
         return obj
 
     def validate(self):
@@ -244,8 +244,8 @@ class Field(object):
     def build_index(self, records=None):
         _logger.debug('Building index of field "{}" in table "{}"'.format(self.name, self.table.name))
 
-        # fake build main index
-        if self.name == self.table.main_index:
+        # fake build primary index
+        if self.name == self.table.primary_index:
             self.indexed_values = []
             self.index_build = True
 
@@ -267,8 +267,8 @@ class Field(object):
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
 
-        # main index - using self.table.record_ids as index
-        if self.name == self.table.main_index:
+        # primary index - using self.table.record_ids as index
+        if self.name == self.table.primary_index:
             return  # should already be added
 
         # remove if already exists
@@ -286,8 +286,8 @@ class Field(object):
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
 
-        # main index - using self.table.record_ids as index
-        if self.name == self.table.main_index:
+        # primary index - using self.table.record_ids as index
+        if self.name == self.table.primary_index:
             return  # should already be removed
 
         # other indexes
@@ -302,8 +302,8 @@ class Field(object):
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
 
-        # main index - using self.table.record_ids as index
-        if self.name == self.table.main_index:
+        # primary index - using self.table.record_ids as index
+        if self.name == self.table.primary_index:
             if rid in self.table.record_ids:
                 return rid
 
@@ -320,7 +320,7 @@ class Field(object):
         :param value: value or list of values
         :return: list of record ids
         """
-        if self.name == self.table.main_index:
+        if self.name == self.table.primary_index:
             indexed_values = list(zip(self.table.record_ids, self.table.record_ids))
         else:
             indexed_values = self.indexed_values
