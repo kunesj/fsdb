@@ -28,14 +28,13 @@ def dec_check_table_exists(f):
     return wrapper
 
 
-class Manager(object):  # TODO: wait for one transaction to finish before doing next one
+class Manager(object):
+    # TODO: wait for one transaction to finish before doing next one.
+    #  Right not its unsafe to use in threaded environments.
 
     def __init__(self, root_path):
         self.root_path = root_path
         self.database = None
-
-        # Used to detect
-        self.transaction_ongoing = False
 
     # Database
 
