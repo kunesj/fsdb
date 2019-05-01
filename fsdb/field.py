@@ -24,21 +24,21 @@ class Field(object):
     ]
 
     # format used to save and load datetime fields from/to json
-    DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S.%f'  # MUST BE filename compatible!!!!! (Could be used as folder name)
+    DATETIME_FORMAT = '%Y-%m-%dT%H-%M-%S.%f'  # MUST BE filename compatible!!!!! (Could be used as folder name)
 
-    def __init__(self, name, type, table, default=None, index=False, unique_index=False, primary_index=False):
+    def __init__(self, name, type, table, default=None, required=False, unique=False, index=False):
         # field data
         self.name = name.strip().lower()
         self.type = type.strip().lower()
         self.default = default
-        self.index = index or unique_index or primary_index  # True if field should be indexed
-        self.unique_index = unique_index or primary_index  # If no duplicate values allowed  # TODO
-        self.primary_index = primary_index  # True if field is primary index (can be only one)
+        self.required = required  # TODO: implement
+        self.unique = unique  # TODO: implement
+        self.index = index  # True if field should be indexed
 
         # run variables
         self.table = table
         self.database = self.table.database
-        self.index_build = False
+        self.index_build = True if self.name == 'id' else False
         self.indexed_values = []  # [(value, record_id), ...] NOT sorted
 
         # validate
@@ -57,21 +57,23 @@ class Field(object):
             'name': self.name,
             'type': self.type,
         }
+        if self.default:
+            data['default'] = self.default
+        if self.required:
+            data['required'] = self.required
+        if self.unique:
+            data['unique'] = self.unique
         if self.index:
             data['index'] = self.index
-        if self.unique_index:
-            data['unique_index'] = self.unique_index
-        if self.primary_index:
-            data['primary_index'] = self.primary_index
         return data
 
     @classmethod
     def from_dict(cls, table, data):
         obj = cls(data['name'], data['type'], table)
         obj.default = data.get('default')
-        obj.index = data.get('index') or data.get('unique_index') or data.get('primary_index')
-        obj.unique_index = data.get('unique_index') or data.get('primary_index')
-        obj.primary_index = data.get('primary_index')
+        obj.required = data.get('required', False)
+        obj.unique = data.get('unique', False)
+        obj.index = data.get('index', False)
         return obj
 
     def validate(self):
@@ -247,8 +249,8 @@ class Field(object):
     def build_index(self, records=None):
         _logger.debug('Building index of field "{}" in table "{}"'.format(self.name, self.table.name))
 
-        # fake build primary index
-        if self.name == self.table.primary_index:
+        # fake build ID index
+        if self.name == 'id':
             self.indexed_values = []
             self.index_build = True
 
@@ -270,8 +272,8 @@ class Field(object):
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
 
-        # primary index - using self.table.record_ids as index
-        if self.name == self.table.primary_index:
+        # ID index - using self.table.record_ids as index
+        if self.name == 'id':
             return  # should already be added
 
         # remove if already exists
@@ -289,8 +291,8 @@ class Field(object):
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
 
-        # primary index - using self.table.record_ids as index
-        if self.name == self.table.primary_index:
+        # ID index - using self.table.record_ids as index
+        if self.name == 'id':
             return  # should already be removed
 
         # other indexes
@@ -305,8 +307,8 @@ class Field(object):
         if not self.index_build:
             raise FsdbError('Attempted access index that\'s not build yet!')
 
-        # primary index - using self.table.record_ids as index
-        if self.name == self.table.primary_index:
+        # ID index - using self.table.record_ids as index
+        if self.name == 'id':
             if rid in self.table.record_ids:
                 return rid
 
@@ -323,7 +325,7 @@ class Field(object):
         :param value: value or list of values
         :return: list of record ids
         """
-        if self.name == self.table.primary_index:
+        if self.name == 'id':
             indexed_values = list(zip(self.table.record_ids, self.table.record_ids))
         else:
             indexed_values = self.indexed_values

@@ -30,10 +30,7 @@ class Table(object):
         self.table_path = os.path.join(self.db_path, self.name)
         self.data_path = os.path.join(self.table_path, self.data_fname)
 
-        self.fields = {
-            'id': Field('id', 'int', self, index=True, primary_index=True)
-        }
-        self.primary_index = 'id'  # used to name record folders (parsed from self.fields at load_data())
+        self.fields = {}
         self.record_ids = []  # NOT sorted
 
         if os.path.exists(self.data_path):
@@ -76,25 +73,16 @@ class Table(object):
         for field_data in data['fields']:
             self.fields[field_data['name']] = Field.from_dict(self, field_data)
 
-        # parse primary index
-        for name in self.fields:
-            if self.fields[name].primary_index:
-                self.primary_index = self.fields[name].name
-                break
-
         # validate
         self.validate()
 
     def validate(self):
-        # one and only one primary index
-        primary_index_found = False
-        for name in self.fields:
-            if self.fields[name].primary_index and primary_index_found:
-                FsdbError('Only one primary index allowed for table "{}"!'.format(self.name))
-            elif self.fields[name].primary_index:
-                primary_index_found = True
-        if not primary_index_found:
-            FsdbError('No primary index defined for table "{}"!'.format(self.name))
+        if 'id' not in self.fields:
+            raise FsdbError('Table "{}" is missing "id" field!')
+        if 'create_datetime' not in self.fields:
+            raise FsdbError('Table "{}" is missing "create_datetime" field!')
+        if 'modify_datetime' not in self.fields:
+            raise FsdbError('Table "{}" is missing "modify_datetime" field!')
 
     def load_record_ids(self):
         self.record_ids = []
@@ -102,20 +90,17 @@ class Table(object):
             record_path = os.path.join(self.table_path, id_str)
             if not os.path.isdir(record_path):
                 continue
-            id = self.fields[self.primary_index].str2val(id_str)
+            id = self.fields['id'].str2val(id_str)
             self.record_ids.append(id)
         return self.record_ids
 
     def build_indexes(self):
         _logger.debug('Building indexes for table "{}"'.format(self.name))
 
-        # build id index
-        self.fields[self.primary_index].build_index()
-
         # get list of fields that are indexes
         index_field_names = []
         for name in self.fields:
-            if name == self.primary_index:
+            if name == 'id':
                 continue
             if self.fields[name].index:
                 index_field_names.append(name)
@@ -132,15 +117,14 @@ class Table(object):
                 self.fields[name].build_index(records)
 
     def get_new_id(self):
-        primary_index_field = self.fields[self.primary_index]
 
-        if primary_index_field.type in ['int', 'float']:
+        if self.fields['id'].type == 'int':
             last_value = max(self.record_ids) if len(self.record_ids) > 0 else 0
-            next_value = last_value + 1.0
-            return int(next_value) if primary_index_field.type == 'int' else float(next_value)
+            next_value = last_value + 1
+            return int(next_value)
 
-        elif primary_index_field.type == 'datetime':
-            return datetime.datetime.now()
+        elif self.fields['id'].type == 'datetime':
+            return datetime.datetime.utcnow()
 
         else:
             raise FsdbError('Unable to generate new ID for table "{}"!'.format(self.name))
@@ -167,7 +151,7 @@ class Table(object):
                 dom_field, dom_eq, dom_value = tuple(dom)
                 if dom_field not in self.fields:
                     FsdbError('Invalid field name "{}" for table "{}"!'.format(dom_field, self.name))
-                if dom_field != self.primary_index:
+                if dom_field != 'id':
                     _logger.warning('Searching by field "{}" will be very slow and resource intensive, '
                                     'because it\'s not index!'.format(dom_field))
                 if dom_eq in ['in', 'not in'] and not isinstance(dom_value, list):
@@ -193,7 +177,10 @@ class Table(object):
                 dom_field, dom_eq, dom_value = tuple(dom)
 
                 # get field value
-                field_value = record.read([dom_field, ])[dom_field]
+                if dom_field == 'id':
+                    field_value = rid
+                else:
+                    field_value = record.read([dom_field, ])[dom_field]
 
                 # filter record by sub-domain
                 if dom_eq == '=':
@@ -270,6 +257,25 @@ class Table(object):
         if os.path.exists(os.path.join(database.db_path, table_name)):
             raise FsdbError('Table "{}" already exists!'.format(table_name))
 
+        # parse ID field type
+        id_type = 'int'
+        for field_data in list(fields):
+            if field_data['name'] == 'id':
+                if field_data['type'] not in ['int', 'datetime']:
+                    raise FsdbError('ID field can\'t be of type "{}"!'.format(field_data['type']))
+                id_type = field_data['type']
+                fields.remove(field_data)
+
+        # detect if any fields have reserved names
+        for field_data in fields:
+            if field_data['name'] in ['data.json', 'id', 'create_datetime', 'modify_datetime']:
+                raise FsdbError('Field name "{}" is reserved name!'.format(field_data['name']))
+
+        # add default fields
+        fields.append({'name': 'id', 'type': id_type, 'required': True, 'unique': True, 'index': True})
+        fields.append({'name': 'create_datetime', 'type': 'datetime'})
+        fields.append({'name': 'modify_datetime', 'type': 'datetime'})
+
         # create table object
         obj = cls(table_name, database)
         obj.fields = {}
@@ -282,6 +288,7 @@ class Table(object):
         obj.save_data()
 
         # load record ids and build indexes (should be instant, since it's a new table)
+        obj.load_data()
         obj.load_record_ids()
         obj.build_indexes()
 

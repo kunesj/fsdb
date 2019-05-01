@@ -7,6 +7,7 @@ import os
 import shutil
 import json
 import copy
+import datetime
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ class Record(object):
         self.fields = self.table.fields
         self.table_path = self.table.table_path
 
-        self.id_str = self.fields[self.table.primary_index].val2str(self.id)
+        self.id_str = self.fields['id'].val2str(self.id)
         self.record_path = os.path.join(self.table_path, self.id_str)
         self.data_path = os.path.join(self.record_path, self.data_fname)
 
@@ -53,11 +54,11 @@ class Record(object):
         _logger.info('CREATE RECORD IN TABLE "{}" SET values={}'.format(table.name, values))
 
         # get/generate record id
-        if values.get(table.primary_index):
-            id = values[table.primary_index]
-        else:
-            id = table.get_new_id()
-        values[table.primary_index] = id
+        values['id'] = values['id'] if values.get('id') else table.get_new_id()
+
+        # init values of system fields
+        values['create_datetime'] = datetime.datetime.utcnow()
+        values['modify_datetime'] = values['create_datetime']
 
         # init default values, remove bad field names
         for name in table.fields:
@@ -69,12 +70,12 @@ class Record(object):
                 del(values[name])
 
         # convert index to string (will be used as folder name) - check if record folder already exists
-        index_str = table.fields[table.primary_index].val2str(id)
+        index_str = table.fields['id'].val2str(values['id'])
         if os.path.exists(os.path.join(table.table_path, index_str)):
             raise FsdbError('Index must be unique!')
 
         # create record object
-        obj = cls(id, table)
+        obj = cls(values['id'], table)
 
         # init record directory
         os.makedirs(obj.record_path)
@@ -85,22 +86,22 @@ class Record(object):
             table.fields[name].write(obj, values[name], data_values)
         with open(obj.data_path, 'w') as f:
             data_values = {k: data_values.get(k) for k in table.fields}
-            f.write(json.dumps(data_values, sort_keys=True, indent=2))
-
-        # update primary index
-        table.fields[table.primary_index].add_to_index(id, id)
+            f.write(json.dumps(copy.deepcopy(data_values), sort_keys=True, indent=2))
 
         # add record to table record ids
         if obj.id not in table.record_ids:
             table.record_ids.append(obj.id)
+
+        # update ID index
+        table.fields['id'].add_to_index(values['id'], values['id'])
 
         return obj
 
     def write(self, values):
         _logger.info('UPDATE RECORD "{}" IN TABLE "{}" SET values={}'.format(self.id_str, self.table.name, values))
         # changing Index value is forbidden
-        if self.table.primary_index in values:
-            raise FsdbError('Changing primary index value is not allowed!')
+        if 'id' in values:
+            raise FsdbError('Changing ID value is not allowed!')
 
         # detect invalid field names
         for name in values:
@@ -110,6 +111,9 @@ class Record(object):
 
         # delete cached value
         self.cache.del_cache(self.cache_key)
+
+        # change modify_datetime value
+        values['modify_datetime'] = datetime.datetime.utcnow()
 
         # load old values and update them with defaults
         with open(self.data_path, 'r') as f:
@@ -127,7 +131,7 @@ class Record(object):
             self.fields[name].write(self, values[name], data_values)
         with open(self.data_path, 'w') as f:
             data_values = {k: data_values.get(k) for k in self.fields}
-            f.write(json.dumps(data_values, sort_keys=True, indent=2))
+            f.write(json.dumps(copy.deepcopy(data_values), sort_keys=True, indent=2))
 
         # update changed indexes
         for name in values:
@@ -147,6 +151,10 @@ class Record(object):
 
         # get cached data
         values = self.cache.from_cache(self.cache_key) or {}
+
+        # add id
+        if 'id' in field_names:
+            values['id'] = self.id
 
         # get list of fields that need to be read
         read_field_names = [name for name in field_names if name not in values]

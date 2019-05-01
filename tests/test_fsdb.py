@@ -34,7 +34,7 @@ class TestFSDB(unittest.TestCase):
                 {
                     'name': 'test_table',
                     'fields': [
-                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                        {'name': 'id', 'type': 'int', },
                         {'name': 'val1', 'type': 'str', },
                         {'name': 'val2', 'type': 'datetime', },
                         {'name': 'val3', 'type': 'list', },
@@ -43,7 +43,7 @@ class TestFSDB(unittest.TestCase):
                 {
                     'name': 'test_table_datetime',
                     'fields': [
-                        {'name': 'id', 'type': 'datetime', 'primary_index': True, }
+                        {'name': 'id', 'type': 'datetime', }
                     ],
                 },
             ],
@@ -121,10 +121,10 @@ class TestFSDB(unittest.TestCase):
                 {
                     'name': 'test_table',
                     'fields': [
-                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                        {'name': 'id', 'type': 'int', },
                     ],
                     'records': [
-                        {}
+                        {'id': 0, }
                     ],
                 },
             ],
@@ -150,10 +150,10 @@ class TestFSDB(unittest.TestCase):
                 {
                     'name': 'test_table',
                     'fields': [
-                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                        {'name': 'id', 'type': 'int', },
                     ],
                     'records': [
-                        {}
+                        {'id': 0, }
                     ],
                 },
             ],
@@ -196,7 +196,7 @@ class TestFSDB(unittest.TestCase):
                 {
                     'name': 'test_table',
                     'fields': [
-                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                        {'name': 'id', 'type': 'int', },
                         {'name': 'file', 'type': 'file', },
                     ],
                 },
@@ -241,7 +241,7 @@ class TestFSDB(unittest.TestCase):
                 {
                     'name': 'test_table',
                     'fields': [
-                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                        {'name': 'id', 'type': 'int', },
                         {'name': 'files', 'type': 'file_list', },
                     ],
                 },
