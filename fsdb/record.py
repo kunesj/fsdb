@@ -101,7 +101,10 @@ class Record(object):
         _logger.info('UPDATE RECORD "{}" IN TABLE "{}" SET values={}'.format(self.id_str, self.table.name, values))
         # changing Index value is forbidden
         if 'id' in values:
-            raise FsdbError('Changing ID value is not allowed!')
+            _logger.warning('Attempted to change record ID. ignoring.')
+            del(values['id'])
+        if 'id_str' in values:
+            del(values['id_str'])
 
         # detect invalid field names
         for name in values:
@@ -155,6 +158,8 @@ class Record(object):
         # add id
         if 'id' in field_names:
             values['id'] = self.id
+            field_names.append('id_str')
+            values['id_str'] = self.id_str
 
         # get list of fields that need to be read
         read_field_names = [name for name in field_names if name not in values]

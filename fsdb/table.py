@@ -21,6 +21,8 @@ class Table(object):
     database = None
     _deleted = False
 
+    RESERVED_FIELD_NAMES = [data_fname, 'id', 'id_str', 'create_datetime', 'modify_datetime']
+
     def __init__(self, name, database):
         self.name = sanitize_filename(name)
         self.database = database
@@ -79,6 +81,8 @@ class Table(object):
     def validate(self):
         if 'id' not in self.fields:
             raise FsdbError('Table "{}" is missing "id" field!')
+        if 'id_str' in self.fields:
+            raise FsdbError('Table "{}" has "id_str" field!')
         if 'create_datetime' not in self.fields:
             raise FsdbError('Table "{}" is missing "create_datetime" field!')
         if 'modify_datetime' not in self.fields:
@@ -134,6 +138,22 @@ class Table(object):
 
         else:
             raise FsdbError('Unable to generate new ID for table "{}"!'.format(self.name))
+
+    # IDs conversion
+
+    def ids2str(self, ids):
+        id_field = self.fields['id']
+        if isinstance(ids, list):
+            return [id_field.val2str(rid) for rid in ids]
+        else:
+            return id_field.val2str(ids)
+
+    def str2ids(self, ids_str):
+        id_field = self.fields['id']
+        if isinstance(ids_str, list):
+            return [id_field.str2val(rid_str) for rid_str in ids_str]
+        else:
+            return id_field.str2val(ids_str)
 
     # records - browse/search
 
@@ -274,7 +294,7 @@ class Table(object):
 
         # detect if any fields have reserved names
         for field_data in fields:
-            if field_data['name'] in ['data.json', 'id', 'create_datetime', 'modify_datetime']:
+            if field_data['name'] in cls.RESERVED_FIELD_NAMES:
                 raise FsdbError('Field name "{}" is reserved name!'.format(field_data['name']))
 
         # add default fields

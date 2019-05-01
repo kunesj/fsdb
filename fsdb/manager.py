@@ -132,6 +132,18 @@ class Manager(object):
             self.database.tables[name].delete()
             del(self.database.tables[name])
 
+    # IDs
+
+    @dec_check_database_opened
+    def ids2str(self, table_name, ids):
+        table = self.get_table(table_name)
+        return table.ids2str(ids)
+
+    @dec_check_database_opened
+    def str2ids(self, table_name, ids_str):
+        table = self.get_table(table_name)
+        return table.str2ids(ids_str)
+
     # Record
 
     @dec_check_database_opened
