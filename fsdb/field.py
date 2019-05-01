@@ -1,10 +1,12 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+from .exceptions import FsdbError, FsdbDatabaseClosed, FsdbObjectNotFound
+from .tools import sanitize_filename
 
+import os
+import shutil
 import datetime
 import logging
-
-from .exceptions import FsdbError, FsdbDatabaseClosed, FsdbObjectNotFound
 
 _logger = logging.getLogger(__name__)
 
@@ -13,10 +15,13 @@ class Field(object):
 
     database = None
 
-    # all field types that should be saved in json file in data_path of record
-    FIELD_TYPES_IN_DATA = ['bool', 'str', 'int', 'float', 'list', 'tuple', 'dict', 'datetime']
     # all valid field types
-    FIELD_TYPES = FIELD_TYPES_IN_DATA + []
+    FIELD_TYPES = [
+        # simple - field types that are saved in data.json file of record
+        'bool', 'str', 'int', 'float', 'list', 'tuple', 'dict', 'datetime',
+        # more complex
+        'file', 'file_list',
+    ]
 
     # format used to save and load datetime fields from/to json
     DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S.%f'  # MUST BE filename compatible!!!!! (Could be used as folder name)
@@ -83,21 +88,49 @@ class Field(object):
         if self.index and self.index_build:
             return self.get_value_from_index(record.index)
 
-        # read values saved in self.data_path
-        if self.type in Field.FIELD_TYPES_IN_DATA:
+        # read
+        if self.type == 'file':
+            filename = data_values.get(self.name)
+            if filename is None:
+                data_values[self.name] = None
+                return None
+
+            # get file path
+            file_path = os.path.join(record.record_path, data_values[self.name])
+            if not os.path.exists(file_path):
+                data_values[self.name] = None
+                return None
+
+            return {'name': filename, 'data': None, 'path': file_path, }
+
+        elif self.type == 'file_list':
+            # get file dir path
+            file_dir_path = os.path.join(record.record_path, self.name)
+            if not os.path.exists(file_dir_path):
+                return []
+
+            # read files
+            file_list = []
+            for filename in os.listdir(file_dir_path):
+                # get file path
+                file_path = os.path.join(file_dir_path, filename)
+                if not os.path.isfile(file_path):
+                    continue
+                # save file data
+                file_list.append({'name': filename, 'data': None, 'path': file_path, })
+
+            return file_list
+
+        elif self.type == 'datetime':
             value = data_values.get(self.name)
-            if value is None:
-                return value
+            return self.str2val(value) if value is not None else None
 
-            if self.type == 'datetime':
-                return self.str2val(value)
-            elif self.type == 'tuple':
-                return tuple(value)
-            else:
-                return value
+        elif self.type == 'tuple':
+            value = data_values.get(self.name)
+            return tuple(value) if value is not None else None
 
-        # read files
-        # TODO
+        else:
+            return data_values.get(self.name)
 
     def write(self, record, value, data_values):
         """
@@ -106,20 +139,77 @@ class Field(object):
         :param data_values: "pointer" to dict with values that will be written to data.json
         :return:
         """
-        # write values saved in self.data_path
-        if self.type in Field.FIELD_TYPES_IN_DATA:
+        if self.type == 'file':
+            # remove old file
+            if data_values.get(self.name) is not None:
+                old_file_path = os.path.join(record.record_path, data_values[self.name])
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+
+            # return if new value is None
             if value is None:
                 data_values[self.name] = value
+                return
 
-            if self.type == 'datetime':
-                data_values[self.name] = self.val2str(value)
-            elif self.type == 'tuple':
-                data_values[self.name] = list(value)
-            else:
-                data_values[self.name] = value
+            # validate new value
+            if not isinstance(value, dict) or not value.get('name') or not value.get('data'):
+                raise FsdbError('Invalid file field value!')
+            if not isinstance(value['data'], bytes):
+                raise FsdbError('File data must be bytes type!')
+            if value['name'] in ['data.json', ] + list(record.fields.keys()):
+                raise FsdbError('Filename is reserved name!')
+            if value['name'] != sanitize_filename(value['name']):
+                raise FsdbError('Filename is not equal to sanitized filename!')
+            for name in record.fields:
+                if self.name == name:
+                    continue
+                if record.fields[name].type == 'file' and data_values.get(name) == value['name']:
+                    raise FsdbError('Filename is in conflict with value of field "{}"!'.format(name))
 
-        # write files
-        pass  # TODO
+            # save new file
+            file_path = os.path.join(record.record_path, value['name'])
+            with open(file_path, 'wb') as f:
+                f.write(value['data'])
+            data_values[self.name] = value['name']
+
+        elif self.type == 'file_list':
+            file_list = value if isinstance(value, list) else []
+
+            # get file dir path
+            file_dir_path = os.path.join(record.record_path, self.name)
+
+            # remove old values
+            if os.path.exists(file_dir_path):
+                shutil.rmtree(file_dir_path)
+            os.makedirs(file_dir_path)
+
+            # validate new value
+            processed_filenames = []
+            for file in file_list:
+                if not isinstance(file, dict) or not file.get('name') or not file.get('data'):
+                    raise FsdbError('Invalid file field value!')
+                if not isinstance(file['data'], bytes):
+                    raise FsdbError('File data must be bytes type!')
+                if file['name'] != sanitize_filename(file['name']):
+                    raise FsdbError('Filename is not equal to sanitized filename!')
+                if file['name'] in processed_filenames:
+                    raise FsdbError('Conflicting filename values in file_list field!')
+                processed_filenames.append(file['name'])
+
+            # write files
+            for file in file_list:
+                file_path = os.path.join(file_dir_path, file['name'])
+                with open(file_path, 'wb') as f:
+                    f.write(file['data'])
+
+        elif self.type == 'datetime':
+            data_values[self.name] = self.val2str(value) if value is not None else None
+
+        elif self.type == 'tuple':
+            data_values[self.name] = list(value) if value is not None else None
+
+        else:
+            data_values[self.name] = value
 
     # to string / from string
 

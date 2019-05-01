@@ -1,13 +1,12 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
-import os
-import logging
-
 from .exceptions import FsdbDatabaseClosed, FsdbObjectNotFound
 from .database import Database
 from .table import Table
 from .record import Record
+
+import os
+import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -77,11 +76,6 @@ class Manager(object):  # TODO: wait for one transaction to finish before doing 
 
     @dec_check_database_opened
     @dec_check_table_exists
-    def update_table(self, name, fields):
-        self.database.tables[name].update(fields)
-
-    @dec_check_database_opened
-    @dec_check_table_exists
     def delete_table(self, name):
         self.database.tables[name].delete()
         del(self.database.tables[name])
@@ -90,15 +84,15 @@ class Manager(object):  # TODO: wait for one transaction to finish before doing 
 
     @dec_check_database_opened
     @dec_check_table_exists
-    def create_records(self, table_name, values):
+    def create_record(self, table_name, values):
         table = self.database.tables[table_name]
         return Record.create(table, values)
 
     @dec_check_database_opened
     @dec_check_table_exists
-    def update_records(self, table_name, values, domain=None):
+    def write_records(self, table_name, values, domain=None):
         records = self.search_records(table_name, domain)
-        map(lambda rec: rec.update(values), records)
+        map(lambda rec: rec.write(values), records)
         return records
 
     @dec_check_database_opened

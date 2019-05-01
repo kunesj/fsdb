@@ -39,11 +39,11 @@ class TestFSDB(unittest.TestCase):
                 {'name': 'val3', 'type': 'list', },
             ]
         )
-        rec1_id = self.fsdb.create_records('test_table', {
+        rec1_id = self.fsdb.create_record('test_table', {
             'val1': 'test_val1-1',
             'val2': datetime.datetime(2000, 1, 1),
         }).index
-        rec2_id = self.fsdb.create_records('test_table', {
+        rec2_id = self.fsdb.create_record('test_table', {
             'val1': 'test_val1-2',
             'val2': datetime.datetime(2000, 1, 2),
         }).index
@@ -54,9 +54,9 @@ class TestFSDB(unittest.TestCase):
                 {'name': 'id', 'type': 'datetime', 'main_index': True, },
             ]
         )
-        self.fsdb.create_records('test_table_datetime', {})
-        rec_dt2 = self.fsdb.create_records('test_table_datetime', {}).read()['id']
-        self.fsdb.create_records('test_table_datetime', {})
+        self.fsdb.create_record('test_table_datetime', {})
+        rec_dt2 = self.fsdb.create_record('test_table_datetime', {}).read()['id']
+        self.fsdb.create_record('test_table_datetime', {})
 
         # reopen database
         db_name = self.fsdb.database.name
@@ -101,7 +101,7 @@ class TestFSDB(unittest.TestCase):
         self.assertEqual(len(records), 2)
 
         # test write
-        rec1.update({'val1': 'edited_1', 'val2': datetime.datetime(2000, 10, 1)})
+        rec1.write({'val1': 'edited_1', 'val2': datetime.datetime(2000, 10, 1)})
         self.fsdb.close_database()
         self.fsdb.open_database(db_name)
         rec1 = self.fsdb.browse_records('test_table', rec1_id)
@@ -116,7 +116,7 @@ class TestFSDB(unittest.TestCase):
             name='test_table',
             fields=[{'name': 'id', 'type': 'int', 'main_index': True, }, ]
         )
-        rec = self.fsdb.create_records('test_table', {})
+        rec = self.fsdb.create_record('test_table', {})
 
         # close db
         self.fsdb.close_database()
@@ -133,7 +133,7 @@ class TestFSDB(unittest.TestCase):
             name='test_table',
             fields=[{'name': 'id', 'type': 'int', 'main_index': True, }, ]
         )
-        rec = self.fsdb.create_records('test_table', {})
+        rec = self.fsdb.create_record('test_table', {})
 
         # test record
         rec.delete()
@@ -146,6 +146,84 @@ class TestFSDB(unittest.TestCase):
         # test database
         db.delete()
         self.assertRaises(FsdbObjectDeleted, lambda: db.name)
+
+    def _assertFileEqual(self, file, file_read):
+        if file is None or file_read is None:
+            self.assertEqual(file, file_read)
+            return
+
+        self.assertEqual(file['name'], file_read['name'])
+
+        if file_read['data'] is None:
+            with open(file_read['path'], 'rb') as f:
+                file_read['data'] = f.read()
+        self.assertEqual(file['data'], file_read['data'])
+
+    def test_file_field(self):
+        # init data
+        self.fsdb.create_table(
+            name='test_table',
+            fields=[
+                {'name': 'id', 'type': 'int', 'main_index': True, },
+                {'name': 'file', 'type': 'file', },
+            ]
+        )
+        f1 = {'name': 'f1.txt', 'data': 'TEST TEXT 1'.encode('utf-8')}
+        f2 = {'name': 'f2.txt', 'data': 'TEST TEXT 2'.encode('utf-8')}
+
+        # create record + test value
+        index = self.fsdb.create_record('test_table', {'file': f1}).index
+        rec = self.fsdb.browse_records('test_table', index)
+        self._assertFileEqual(f1, rec.read()['file'])
+
+        # write record + test that value changed
+        rec.write({'file': f2})
+        self._assertFileEqual(f2, rec.read()['file'])
+
+        # write None + test that value changed
+        rec.write({'file': None})
+        self._assertFileEqual(None, rec.read()['file'])
+
+    def _assertFileListEqual(self, file_list, file_list_read):
+        file_list = file_list if file_list else []
+        self.assertEqual(len(file_list), len(file_list_read))
+
+        for file in file_list:
+            file_read = None
+            for tmp in file_list_read:
+                if tmp['name'] == file['name']:
+                    file_read = tmp
+                    break
+            self.assertIsNotNone(file_read)
+            self._assertFileEqual(file, file_read)
+
+    def test_file_list_field(self):
+        # init data
+        self.fsdb.create_table(
+            name='test_table',
+            fields=[
+                {'name': 'id', 'type': 'int', 'main_index': True, },
+                {'name': 'files', 'type': 'file_list', },
+            ]
+        )
+        f1 = {'name': 'f1.txt', 'data': 'TEST TEXT 1'.encode('utf-8')}
+        f2 = {'name': 'f2.txt', 'data': 'TEST TEXT 2'.encode('utf-8')}
+        f3 = {'name': 'f3.txt', 'data': 'TEST TEXT 3'.encode('utf-8')}
+        fl1 = [f1, f2]
+        fl2 = [f2, f3]
+
+        # create record + test value
+        index = self.fsdb.create_record('test_table', {'files': fl1}).index
+        rec = self.fsdb.browse_records('test_table', index)
+        self._assertFileListEqual(fl1, rec.read()['files'])
+
+        # write record + test that value changed
+        rec.write({'files': fl2})
+        self._assertFileListEqual(fl2, rec.read()['files'])
+
+        # write None + test that value changed
+        rec.write({'files': None})
+        self._assertFileListEqual(None, rec.read()['files'])
 
 
 if __name__ == '__main__':

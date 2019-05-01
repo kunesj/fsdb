@@ -1,14 +1,12 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed
+from .tools import sanitize_filename
 
 import os
 import shutil
 import json
 import logging
-
-from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed
-from .tools import sanitize_filename
-from .field import Field
 
 _logger = logging.getLogger(__name__)
 
@@ -47,7 +45,7 @@ class Record(object):
     def generate_cache_key(self):
         return "{}-{}".format(self.table.name, self.index_str)
 
-    # create/update/read/delete
+    # create/write/read/delete
 
     @classmethod
     def create(cls, table, values):
@@ -88,7 +86,7 @@ class Record(object):
 
         return obj
 
-    def update(self, values):
+    def write(self, values):
         _logger.info('UPDATE RECORD "{}" IN TABLE "{}" SET values={}'.format(self.index_str, self.table.name, values))
         # changing Index value is forbidden
         if self.table.main_index in values:
@@ -100,6 +98,9 @@ class Record(object):
                 _logger.warning('Write to invalid field name "{}" in table "{}"'.format(name, self.table.name))
                 del(values[name])
 
+        # delete cached value
+        self.cache.del_cache(self.cache_key)
+
         # save all values
         with open(self.data_path, 'r') as f:
             data_values = json.loads(f.read())
@@ -110,10 +111,6 @@ class Record(object):
         with open(self.data_path, 'w') as f:
             data_values = {k: data_values.get(k) for k in self.fields}
             f.write(json.dumps(data_values, sort_keys=True, indent=2))
-
-        # update cached version
-        old_values = self.cache.from_cache(self.cache_key) or {}
-        self.cache.to_cache(self.cache_key, dict(old_values, **values))
 
         # update changed indexes
         for name in values:

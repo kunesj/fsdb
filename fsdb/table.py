@@ -1,16 +1,15 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed
+from .tools import sanitize_filename
+from .field import Field
+from .record import Record
 
 import os
 import json
 import copy
 import shutil
 import logging
-
-from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed, FsdbObjectNotFound
-from .tools import sanitize_filename
-from .field import Field
-from .record import Record
 
 _logger = logging.getLogger(__name__)
 
@@ -106,7 +105,7 @@ class Table(object):
             self.record_ids.append(index)
         return self.record_ids
 
-    def build_indexes(self):
+    def build_indexes(self):  # TODO: record_ids from index (or opposite)
         _logger.debug('Building indexes for table "{}"'.format(self.name))
 
         # get list of fields that are indexes
@@ -234,7 +233,7 @@ class Table(object):
         # return records
         return records
 
-    # create/update/delete
+    # create/delete
 
     @classmethod
     def create(cls, database, name, fields):
@@ -268,16 +267,6 @@ class Table(object):
         database.tables[obj.name] = obj
 
         return obj
-
-    def update(self, fields):
-        _logger.info('UPDATE TABLE "{}" SET fields={}'.format(self.name, fields))
-        self.fields = {}
-        for field_data in fields:
-            self.fields[field_data['name']] = Field.from_dict(self, field_data)
-        self.validate()
-        self.save_data()
-        self.load_record_ids()
-        self.build_indexes()
 
     def delete(self):
         _logger.info('DELETE TABLE "{}"'.format(self.name))

@@ -1,16 +1,15 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed, FsdbObjectNotFound
+from .tools import sanitize_filename
+from .table import Table
+from .cache import Cache
 
 import os
 import json
 import copy
 import shutil
 import logging
-
-from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed, FsdbObjectNotFound
-from .tools import sanitize_filename
-from .table import Table
-from .cache import Cache
 
 _logger = logging.getLogger(__name__)
 
