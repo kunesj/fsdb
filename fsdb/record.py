@@ -6,6 +6,7 @@ from .tools import sanitize_filename
 import os
 import shutil
 import json
+import copy
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -52,13 +53,22 @@ class Record(object):
         _logger.info('CREATE RECORD IN TABLE "{}" SET values={}'.format(table.name, values))
 
         # get/generate record id
-        if table.primary_index in values:
+        if values.get(table.primary_index):
             id = values[table.primary_index]
         else:
             id = table.get_new_id()
         values[table.primary_index] = id
 
-        # convert index to string (will be used as folder name)
+        # init default values, remove bad field names
+        for name in table.fields:
+            if name not in values:
+                values[name] = copy.deepcopy(table.fields[name].default)
+        for name in list(values.keys()):
+            if name not in table.fields.keys():
+                _logger.warning('Write to invalid field name "{}" in table "{}"'.format(name, table.name))
+                del(values[name])
+
+        # convert index to string (will be used as folder name) - check if record folder already exists
         index_str = table.fields[table.primary_index].val2str(id)
         if os.path.exists(os.path.join(table.table_path, index_str)):
             raise FsdbError('Index must be unique!')
@@ -94,20 +104,27 @@ class Record(object):
 
         # detect invalid field names
         for name in values:
-            if name not in self.fields:
+            if name not in self.fields.keys():
                 _logger.warning('Write to invalid field name "{}" in table "{}"'.format(name, self.table.name))
                 del(values[name])
 
         # delete cached value
         self.cache.del_cache(self.cache_key)
 
-        # save all values
+        # load old values and update them with defaults
         with open(self.data_path, 'r') as f:
             data_values = json.loads(f.read())
+        for name in self.table.fields:
+            if name not in data_values:
+                data_values[name] = copy.deepcopy(self.table.fields[name].default)
+        for name in data_values:
+            if name not in self.fields.keys():
+                _logger.info('Removing old field "{}" from record data."'.format(name))
+                del(data_values[name])
 
+        # save all values
         for name in values:
             self.fields[name].write(self, values[name], data_values)
-
         with open(self.data_path, 'w') as f:
             data_values = {k: data_values.get(k) for k in self.fields}
             f.write(json.dumps(data_values, sort_keys=True, indent=2))
@@ -140,6 +157,9 @@ class Record(object):
         # read values
         with open(self.data_path, 'r') as f:
             data_values = json.loads(f.read())
+        for name in self.table.fields:
+            if name not in data_values:
+                data_values[name] = copy.deepcopy(self.table.fields[name].default)
         for name in read_field_names:
             values[name] = self.fields[name].read(self, data_values)
 

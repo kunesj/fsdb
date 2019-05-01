@@ -220,7 +220,7 @@ class Table(object):
                 domain_changed = False
                 for i in range(len(domain_processed)-1):
                     if isinstance(domain_processed[i], bool) and isinstance(domain_processed[i+1], bool):
-                        op = domain_processed[i-1] if i != 0 else '&'
+                        op = domain_processed[i-1] if (i >= 1 and isinstance(domain_processed[i-1], str)) else '&'
                         if op == '&':
                             out = domain_processed[i] and domain_processed[i+1]
                         elif op == '|':

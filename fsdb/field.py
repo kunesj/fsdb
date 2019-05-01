@@ -26,10 +26,11 @@ class Field(object):
     # format used to save and load datetime fields from/to json
     DATETIME_FORMAT = '%Y-%m-%d_%H-%M-%S.%f'  # MUST BE filename compatible!!!!! (Could be used as folder name)
 
-    def __init__(self, name, type, table, index=False, unique_index=False, primary_index=False):
+    def __init__(self, name, type, table, default=None, index=False, unique_index=False, primary_index=False):
         # field data
         self.name = name.strip().lower()
         self.type = type.strip().lower()
+        self.default = default
         self.index = index or unique_index or primary_index  # True if field should be indexed
         self.unique_index = unique_index or primary_index  # If no duplicate values allowed  # TODO
         self.primary_index = primary_index  # True if field is primary index (can be only one)
@@ -67,6 +68,7 @@ class Field(object):
     @classmethod
     def from_dict(cls, table, data):
         obj = cls(data['name'], data['type'], table)
+        obj.default = data.get('default')
         obj.index = data.get('index') or data.get('unique_index') or data.get('primary_index')
         obj.unique_index = data.get('unique_index') or data.get('primary_index')
         obj.primary_index = data.get('primary_index')
@@ -174,6 +176,7 @@ class Field(object):
 
         elif self.type == 'file_list':
             file_list = value if isinstance(value, list) else []
+            data_values[self.name] = None
 
             # get file dir path
             file_dir_path = os.path.join(record.record_path, self.name)

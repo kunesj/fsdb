@@ -36,6 +36,55 @@ class Manager(object):
         self.root_path = root_path
         self.database = None
 
+    def init_from_config(self, config):
+        """
+        Initializes databases with values from JSON config.
+        :param config: [
+            {
+                'name': database_name,
+                'tables': [
+                    {
+                        'name': table_name,
+                        'fields': [
+                            {
+                                'name': field_name,
+                                'type': field_type,
+                                'default': default_value,  (optional)
+                                'index': False,  (optional)
+                                'unique_index': False,  (optional)
+                                'primary_index': False,  (required, but in only one field)
+                            },
+                            ...
+                        ],
+                        'records': [{ values }, ...]
+                    },
+                    ...
+                ]
+            },
+            ...
+        ]
+        """
+        _logger.info('INIT FROM CONFIG')
+
+        for db_config in config:
+            if not self.is_database(db_config['name']):
+                self.create_database(db_config['name'])
+            self.open_database(db_config['name'])
+
+            for table_config in db_config.get('tables', []):
+                if not self.is_table(table_config['name']):
+                    self.create_table(table_config['name'], table_config['fields'])
+
+                for record_values in table_config.get('records', []):
+                    domain = []
+                    for key in record_values:
+                        domain.append((key, '=', record_values[key]))
+                    found_records = self.search_records(table_config['name'], domain, limit=1)
+                    if len(found_records) == 0:
+                        self.create_record(table_config['name'], record_values)
+
+            self.close_database()
+
     # Database
 
     def is_database(self, name):

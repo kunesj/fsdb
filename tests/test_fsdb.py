@@ -20,8 +20,6 @@ class TestFSDB(unittest.TestCase):
     def setUp(self):
         self.root_path = tempfile.mkdtemp(prefix='fsdb_test_')
         self.fsdb = fsdb.Manager(self.root_path)
-        self.fsdb.create_database('test_db')
-        self.fsdb.open_database('test_db')
 
     def tearDown(self):
         self.fsdb = None
@@ -30,15 +28,28 @@ class TestFSDB(unittest.TestCase):
 
     def test_basic(self):
         # create test data
-        self.fsdb.create_table(
-            name='test_table',
-            fields=[
-                {'name': 'id', 'type': 'int', 'primary_index': True, },
-                {'name': 'val1', 'type': 'str', },
-                {'name': 'val2', 'type': 'datetime', },
-                {'name': 'val3', 'type': 'list', },
-            ]
-        )
+        self.fsdb.init_from_config([{
+            'name': 'test_db',
+            'tables': [
+                {
+                    'name': 'test_table',
+                    'fields': [
+                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                        {'name': 'val1', 'type': 'str', },
+                        {'name': 'val2', 'type': 'datetime', },
+                        {'name': 'val3', 'type': 'list', },
+                    ],
+                },
+                {
+                    'name': 'test_table_datetime',
+                    'fields': [
+                        {'name': 'id', 'type': 'datetime', 'primary_index': True, }
+                    ],
+                },
+            ],
+        }])
+        self.fsdb.open_database('test_db')
+
         rec1_id = self.fsdb.create_record('test_table', {
             'val1': 'test_val1-1',
             'val2': datetime.datetime(2000, 1, 1),
@@ -48,12 +59,6 @@ class TestFSDB(unittest.TestCase):
             'val2': datetime.datetime(2000, 1, 2),
         }).id
 
-        self.fsdb.create_table(
-            name='test_table_datetime',
-            fields=[
-                {'name': 'id', 'type': 'datetime', 'primary_index': True, },
-            ]
-        )
         self.fsdb.create_record('test_table_datetime', {})
         rec_dt2 = self.fsdb.create_record('test_table_datetime', {}).read()['id']
         self.fsdb.create_record('test_table_datetime', {})
@@ -110,13 +115,25 @@ class TestFSDB(unittest.TestCase):
         self.assertEqual(rec1_data['val2'], datetime.datetime(2000, 10, 1))
 
     def test_closed_access(self):
-        # init data
+        self.fsdb.init_from_config([{
+            'name': 'test_db',
+            'tables': [
+                {
+                    'name': 'test_table',
+                    'fields': [
+                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                    ],
+                    'records': [
+                        {}
+                    ],
+                },
+            ],
+        }])
+        self.fsdb.open_database('test_db')
+
         db = self.fsdb.database
-        tbl = self.fsdb.create_table(
-            name='test_table',
-            fields=[{'name': 'id', 'type': 'int', 'primary_index': True, }, ]
-        )
-        rec = self.fsdb.create_record('test_table', {})
+        tbl = self.fsdb.database.tables[list(self.fsdb.database.tables.keys())[0]]
+        rec = self.fsdb.search_records('test_table')[0]
 
         # close db
         self.fsdb.close_database()
@@ -127,13 +144,25 @@ class TestFSDB(unittest.TestCase):
         self.assertRaises(FsdbDatabaseClosed, lambda: rec.name)
 
     def test_deleted_access(self):
-        # init data
+        self.fsdb.init_from_config([{
+            'name': 'test_db',
+            'tables': [
+                {
+                    'name': 'test_table',
+                    'fields': [
+                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                    ],
+                    'records': [
+                        {}
+                    ],
+                },
+            ],
+        }])
+        self.fsdb.open_database('test_db')
+
         db = self.fsdb.database
-        tbl = self.fsdb.create_table(
-            name='test_table',
-            fields=[{'name': 'id', 'type': 'int', 'primary_index': True, }, ]
-        )
-        rec = self.fsdb.create_record('test_table', {})
+        tbl = self.fsdb.database.tables[list(self.fsdb.database.tables.keys())[0]]
+        rec = self.fsdb.search_records('test_table')[0]
 
         # test record
         rec.delete()
@@ -161,13 +190,20 @@ class TestFSDB(unittest.TestCase):
 
     def test_file_field(self):
         # init data
-        self.fsdb.create_table(
-            name='test_table',
-            fields=[
-                {'name': 'id', 'type': 'int', 'primary_index': True, },
-                {'name': 'file', 'type': 'file', },
-            ]
-        )
+        self.fsdb.init_from_config([{
+            'name': 'test_db',
+            'tables': [
+                {
+                    'name': 'test_table',
+                    'fields': [
+                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                        {'name': 'file', 'type': 'file', },
+                    ],
+                },
+            ],
+        }])
+        self.fsdb.open_database('test_db')
+
         f1 = {'name': 'f1.txt', 'data': 'TEST TEXT 1'.encode('utf-8')}
         f2 = {'name': 'f2.txt', 'data': 'TEST TEXT 2'.encode('utf-8')}
 
@@ -199,13 +235,20 @@ class TestFSDB(unittest.TestCase):
 
     def test_file_list_field(self):
         # init data
-        self.fsdb.create_table(
-            name='test_table',
-            fields=[
-                {'name': 'id', 'type': 'int', 'primary_index': True, },
-                {'name': 'files', 'type': 'file_list', },
-            ]
-        )
+        self.fsdb.init_from_config([{
+            'name': 'test_db',
+            'tables': [
+                {
+                    'name': 'test_table',
+                    'fields': [
+                        {'name': 'id', 'type': 'int', 'primary_index': True, },
+                        {'name': 'files', 'type': 'file_list', },
+                    ],
+                },
+            ],
+        }])
+        self.fsdb.open_database('test_db')
+
         f1 = {'name': 'f1.txt', 'data': 'TEST TEXT 1'.encode('utf-8')}
         f2 = {'name': 'f2.txt', 'data': 'TEST TEXT 2'.encode('utf-8')}
         f3 = {'name': 'f3.txt', 'data': 'TEST TEXT 3'.encode('utf-8')}
