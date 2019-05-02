@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed
-from .tools import sanitize_filename
+from .exceptions import FsdbError, FsdbObjectDeleted, FsdbDatabaseClosed, FsdbOrderError, FsdbDomainError
+from .tools import sanitize_filename, validate_order, validate_domain, evaluate_domain
 from .field import Field
 from .record import Record
 
@@ -33,7 +33,7 @@ class Table(object):
         self.data_path = os.path.join(self.table_path, self.data_fname)
 
         self.fields = {}
-        self.record_ids = []  # NOT sorted
+        self.record_ids = []  # sorted unless record with custom id vas created
 
         if os.path.exists(self.data_path):
             self.load_data()
@@ -101,6 +101,8 @@ class Table(object):
             # parse id and add to list of ids
             id = self.fields['id'].str2val(id_str)
             self.record_ids.append(id)
+        self.record_ids.sort()
+
         return self.record_ids
 
     def get_new_id(self):
@@ -144,100 +146,71 @@ class Table(object):
         domain = domain if domain else []
         limit = limit if (limit and limit >= 0) else None
 
-        # validate domain  # TODO: make better
-        for dom in domain:
-            if isinstance(dom, str):
-                if dom not in ['&', '|']:
-                    FsdbError('Invalid domain logic operator "{}"! Only "&" and "|" are allowed.'.format(dom))
-
-            else:
-                dom_field, dom_eq, dom_value = tuple(dom)
-                if dom_field not in self.fields:
-                    FsdbError('Invalid field name "{}" for table "{}"!'.format(dom_field, self.name))
-                if dom_eq in ['in', 'not in'] and not isinstance(dom_value, list):
-                    FsdbError('Domain with \'in\' or \'not in\' must have value of type list!')
-
-        # if emjpty domain return all records
+        # if empty domain return all records
         if len(domain) == 0:
-            return [Record(rid, self) for rid in self.record_ids[:limit]]
+            records = [Record(rid, self) for rid in self.record_ids[:limit]]
 
         # filter record ids with domain
-        records = []
-        for rid in self.record_ids:
-            record = Record(rid, self)
+        else:
+            validate_domain(domain, self.fields.keys())
+            records = []
+            for rid in self.record_ids:
+                record = Record(rid, self)
 
-            domain_processed = []
-            for dom in domain:
-                # & or |
-                if isinstance(dom, str):
-                    domain_processed.append(dom)
-                    continue
+                domain_processed = []
+                for dom in domain:
+                    # & or |
+                    if isinstance(dom, str):
+                        domain_processed.append(dom)
+                        continue
 
-                # get sub-domain
-                dom_field, dom_eq, dom_value = tuple(dom)
+                    # get sub-domain
+                    dom_field, dom_eq, dom_value = tuple(dom)
 
-                # get field value
-                if dom_field == 'id':
-                    field_value = rid
-                else:
-                    field_value = record.read([dom_field, ])[dom_field]
+                    # get field value
+                    if dom_field == 'id':
+                        field_value = rid
+                    else:
+                        field_value = record.read([dom_field, ])[dom_field]
 
-                # filter record by sub-domain
-                if dom_eq == '=':
-                    domain_processed.append(field_value == dom_value)
-                elif dom_eq == '!=':
-                    domain_processed.append(field_value != dom_value)
-                elif dom_eq == 'in':
-                    domain_processed.append(field_value in dom_value)
-                elif dom_eq == 'not in':
-                    domain_processed.append(field_value not in dom_value)
-                elif dom_eq == '>':
-                    domain_processed.append(field_value > dom_value)
-                elif dom_eq == '>=':
-                    domain_processed.append(field_value >= dom_value)
-                elif dom_eq == '<':
-                    domain_processed.append(field_value < dom_value)
-                elif dom_eq == '<=':
-                    domain_processed.append(field_value <= dom_value)
-                else:
-                    raise FsdbError('Invalid domain! {}'.format(domain))
+                    # filter record by sub-domain
+                    if dom_eq == '=':
+                        domain_processed.append(field_value == dom_value)
+                    elif dom_eq == '!=':
+                        domain_processed.append(field_value != dom_value)
+                    elif dom_eq == 'in':
+                        domain_processed.append(field_value in dom_value)
+                    elif dom_eq == 'not in':
+                        domain_processed.append(field_value not in dom_value)
+                    elif dom_eq == '>':
+                        domain_processed.append(field_value > dom_value)
+                    elif dom_eq == '>=':
+                        domain_processed.append(field_value >= dom_value)
+                    elif dom_eq == '<':
+                        domain_processed.append(field_value < dom_value)
+                    elif dom_eq == '<=':
+                        domain_processed.append(field_value <= dom_value)
+                    else:
+                        raise FsdbDomainError(domain)
 
-            # evaluate processed domain  # TODO: test this
-            while len(domain_processed) >= 2:
-                domain_changed = False
-                for i in range(len(domain_processed)-1):
-                    if isinstance(domain_processed[i], bool) and isinstance(domain_processed[i+1], bool):
-                        op = domain_processed[i-1] if (i >= 1 and isinstance(domain_processed[i-1], str)) else '&'
-                        if op == '&':
-                            out = domain_processed[i] and domain_processed[i+1]
-                        elif op == '|':
-                            out = domain_processed[i] or domain_processed[i+1]
-                        else:
-                            raise FsdbError('Invalid processed domain! {}'.format(domain_processed))
+                # evaluate processed domain
+                result = evaluate_domain(domain_processed)
 
-                        if i == 0:
-                            domain_processed.pop(i+1)
-                            domain_processed[i] = out
-                        else:
-                            domain_processed.pop(i+1)
-                            domain_processed[i-1] = out
-                            domain_processed.pop(i)
-
-                        domain_changed = True
+                # evaluate result
+                if result:
+                    records.append(record)
+                    if limit is not None and len(records) >= limit:
                         break
 
-                if not domain_changed:
-                    break
-
-            if len(domain_processed) > 1:
-                raise FsdbError('Invalid processed domain! {}'.format(domain_processed))
-            result = bool(domain_processed[0])
-
-            # evaluate result
-            if result:
-                records.append(record)
-                if limit is not None and len(records) >= limit:
-                    break
+        # sort records
+        if order:
+            validate_order(order)
+            for o in reversed(order.split(',')):
+                name = o.strip().split(' ')[0]
+                reverse = o.strip().split(' ')[-1].lower() == 'desc'
+                if name not in self.fields:
+                    raise FsdbOrderError('Invalid field name "{}"!'.format(name))
+                records.sort(key=lambda x: x.read([name])[name], reverse=reverse)
 
         # return records
         return records

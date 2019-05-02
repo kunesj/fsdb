@@ -162,9 +162,9 @@ class Manager(object):
         return table.browse_records(ids)
 
     @dec_check_database_opened
-    def search_records(self, table_name, domain=None, limit=None):
+    def search_records(self, table_name, domain=None, order=None, limit=None):
         table = self.get_table(table_name)
-        return table.search_records(domain=domain, limit=limit)
+        return table.search_records(domain=domain, order=order, limit=limit)
 
     @dec_check_database_opened
     def delete_records(self, table_name, domain=None):
