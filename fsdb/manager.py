@@ -43,7 +43,6 @@ class Manager(object):
                                 'default': default_value,  (optional)
                                 'required': False, (optional)
                                 'unique': False,  (optional)
-                                'index': False,  (optional)
                             },
                             ...
                         ],

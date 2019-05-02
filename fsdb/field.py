@@ -26,20 +26,17 @@ class Field(object):
     # format used to save and load datetime fields from/to json
     DATETIME_FORMAT = '%Y-%m-%dT%H-%M-%S.%f'  # MUST BE filename compatible!!!!! (Could be used as folder name)
 
-    def __init__(self, name, type, table, default=None, required=False, unique=False, index=False):
+    def __init__(self, name, type, table, default=None, required=False, unique=False):
         # field data
         self.name = name.strip().lower()
         self.type = type.strip().lower()
         self.default = default
         self.required = required  # TODO: implement
         self.unique = unique  # TODO: implement
-        self.index = index  # True if field should be indexed
 
         # run variables
         self.table = table
         self.database = self.table.database
-        self.index_build = True if self.name == 'id' else False
-        self.indexed_values = []  # [(value, record_id), ...] NOT sorted
 
         # validate
         self.validate()
@@ -63,8 +60,6 @@ class Field(object):
             data['required'] = self.required
         if self.unique:
             data['unique'] = self.unique
-        if self.index:
-            data['index'] = self.index
         return data
 
     @classmethod
@@ -73,7 +68,6 @@ class Field(object):
         obj.default = data.get('default')
         obj.required = data.get('required', False)
         obj.unique = data.get('unique', False)
-        obj.index = data.get('index', False)
         return obj
 
     def validate(self):
@@ -88,11 +82,6 @@ class Field(object):
         :param data_values: "pointer" to dict with values read from data.json
         :return: value
         """
-        # read value from index
-        if self.index and self.index_build:
-            return self.get_value_from_index(record.id)
-
-        # read
         if self.type == 'file':
             filename = data_values.get(self.name)
             if filename is None:
@@ -243,110 +232,3 @@ class Field(object):
         else:
             raise FsdbError('Unsupported str2val type "{}"!'.format(self.type))
         return val
-
-    # index
-
-    def build_index(self, records=None):
-        _logger.debug('Building index of field "{}" in table "{}"'.format(self.name, self.table.name))
-
-        # fake build ID index
-        if self.name == 'id':
-            self.indexed_values = []
-            self.index_build = True
-
-        # build other indexes
-        else:
-            # get list of records if not given
-            if records is None:
-                records = self.table.browse_records(self.table.record_ids)
-
-            # create list of (value, id)
-            self.indexed_values = []
-            for rec in records:
-                self.indexed_values.append((rec.read([self.name])[self.name], rec.id))
-            self.index_build = True
-
-    def add_to_index(self, value, rid):
-        if not self.index:
-            raise FsdbError('Attempted to add value to index of field that is not index! Ignoring.')
-        if not self.index_build:
-            raise FsdbError('Attempted access index that\'s not build yet!')
-
-        # ID index - using self.table.record_ids as index
-        if self.name == 'id':
-            return  # should already be added
-
-        # remove if already exists
-        for sublist in self.indexed_values:
-            if sublist[1] == rid:
-                self.indexed_values.remove(sublist)
-                break
-
-        # add new value
-        self.indexed_values.append((value, rid))
-
-    def remove_from_index(self, rid):
-        if not self.index:
-            raise FsdbError('Attempted to remove value from index of field that is not index!')
-        if not self.index_build:
-            raise FsdbError('Attempted access index that\'s not build yet!')
-
-        # ID index - using self.table.record_ids as index
-        if self.name == 'id':
-            return  # should already be removed
-
-        # other indexes
-        for sublist in self.indexed_values:
-            if sublist[1] == rid:
-                self.indexed_values.remove(sublist)
-                break
-
-    def get_value_from_index(self, rid):
-        if not self.index:
-            raise FsdbError('Attempted to get value from index of field that is not index!')
-        if not self.index_build:
-            raise FsdbError('Attempted access index that\'s not build yet!')
-
-        # ID index - using self.table.record_ids as index
-        if self.name == 'id':
-            if rid in self.table.record_ids:
-                return rid
-
-        # other indexes
-        for sublist in self.indexed_values:
-            if sublist[1] == rid:
-                return sublist[0]
-
-        raise FsdbObjectNotFound('Record ID not found in index!')
-
-    def search_index(self, eq, value):  # TODO: not used anywhere right now
-        """
-        :param eq: =, !=, in, not in, >, >=, <, <=, ...
-        :param value: value or list of values
-        :return: list of record ids
-        """
-        if self.name == 'id':
-            indexed_values = list(zip(self.table.record_ids, self.table.record_ids))
-        else:
-            indexed_values = self.indexed_values
-
-        if eq == '=':
-            items = filter(lambda x: x[0] == value, indexed_values)
-        elif eq == '!=':
-            items = filter(lambda x: x[0] != value, indexed_values)
-        elif eq == 'in':
-            items = filter(lambda x: x[0] in value, indexed_values)
-        elif eq == 'not in':
-            items = filter(lambda x: x[0] not in value, indexed_values)
-        elif eq == '>':
-            items = filter(lambda x: x[0] > value, indexed_values)
-        elif eq == '>=':
-            items = filter(lambda x: x[0] >= value, indexed_values)
-        elif eq == '<':
-            items = filter(lambda x: x[0] < value, indexed_values)
-        elif eq == '<=':
-            items = filter(lambda x: x[0] <= value, indexed_values)
-        else:
-            raise NotImplementedError
-
-        return map(lambda x: x[1], items)

@@ -69,10 +69,10 @@ class Record(object):
                 _logger.warning('Write to invalid field name "{}" in table "{}"'.format(name, table.name))
                 del(values[name])
 
-        # convert index to string (will be used as folder name) - check if record folder already exists
-        index_str = table.fields['id'].val2str(values['id'])
-        if os.path.exists(os.path.join(table.table_path, index_str)):
-            raise FsdbError('Index must be unique!')
+        # convert id to string (will be used as folder name) - check if record folder already exists
+        id_str = table.fields['id'].val2str(values['id'])
+        if os.path.exists(os.path.join(table.table_path, id_str)):
+            raise FsdbError('ID must be unique!')
 
         # create record object
         obj = cls(values['id'], table)
@@ -91,9 +91,6 @@ class Record(object):
         # add record to table record ids
         if obj.id not in table.record_ids:
             table.record_ids.append(obj.id)
-
-        # update ID index
-        table.fields['id'].add_to_index(values['id'], values['id'])
 
         return obj
 
@@ -135,11 +132,6 @@ class Record(object):
         with open(self.data_path, 'w') as f:
             data_values = {k: data_values.get(k) for k in self.fields}
             f.write(json.dumps(copy.deepcopy(data_values), sort_keys=True, indent=2))
-
-        # update changed indexes
-        for name in values:
-            if self.fields[name].index:
-                self.table.fields[name].add_to_index(values[name], self.id)
 
     def read(self, field_names=None):
         _logger.info('READ RECORD "{}" IN TABLE "{}" GET {}'.format(self.id_str, self.table.name, field_names or 'ALL'))
@@ -186,10 +178,6 @@ class Record(object):
         _logger.info('DELETE RECORD "{}" IN TABLE "{}"'.format(self.id_str, self.table.name))
         # delete cached version
         self.cache.del_cache(self.cache_key)
-        # remove from index
-        for name in self.fields:
-            if self.fields[name].index:
-                self.table.fields[name].remove_from_index(self.id)
         # remove from table list of ids
         if self.id in self.table.record_ids:
             self.table.record_ids.remove(self.id)

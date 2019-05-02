@@ -38,7 +38,6 @@ class Table(object):
         if os.path.exists(self.data_path):
             self.load_data()
             self.load_record_ids()
-            self.build_indexes()
 
     def __getattribute__(self, name):
         # check if table is deleted
@@ -104,28 +103,6 @@ class Table(object):
             self.record_ids.append(id)
         return self.record_ids
 
-    def build_indexes(self):
-        _logger.debug('Building indexes for table "{}"'.format(self.name))
-
-        # get list of fields that are indexes
-        index_field_names = []
-        for name in self.fields:
-            if name == 'id':
-                continue
-            if self.fields[name].index:
-                index_field_names.append(name)
-
-        # build indexes
-        if len(index_field_names) > 0:
-            # prefetch data to cache
-            records = self.browse_records(self.record_ids)
-            for rec in records[:1000]:
-                rec.read(index_field_names)
-
-            # build indexes
-            for name in index_field_names:
-                self.fields[name].build_index(records)
-
     def get_new_id(self):
 
         if self.fields['id'].type == 'int':
@@ -163,7 +140,7 @@ class Table(object):
         else:
             return Record(ids, self) if ids in self.record_ids else None
 
-    def search_records(self, domain=None, limit=None):
+    def search_records(self, domain=None, order=None, limit=None):
         domain = domain if domain else []
         limit = limit if (limit and limit >= 0) else None
 
@@ -177,9 +154,6 @@ class Table(object):
                 dom_field, dom_eq, dom_value = tuple(dom)
                 if dom_field not in self.fields:
                     FsdbError('Invalid field name "{}" for table "{}"!'.format(dom_field, self.name))
-                if dom_field != 'id':
-                    _logger.warning('Searching by field "{}" will be very slow and resource intensive, '
-                                    'because it\'s not index!'.format(dom_field))
                 if dom_eq in ['in', 'not in'] and not isinstance(dom_value, list):
                     FsdbError('Domain with \'in\' or \'not in\' must have value of type list!')
 
@@ -298,7 +272,7 @@ class Table(object):
                 raise FsdbError('Field name "{}" is reserved name!'.format(field_data['name']))
 
         # add default fields
-        fields.append({'name': 'id', 'type': id_type, 'required': True, 'unique': True, 'index': True})
+        fields.append({'name': 'id', 'type': id_type, 'required': True, 'unique': True})
         fields.append({'name': 'create_datetime', 'type': 'datetime'})
         fields.append({'name': 'modify_datetime', 'type': 'datetime'})
 
@@ -313,10 +287,9 @@ class Table(object):
         os.makedirs(obj.table_path)
         obj.save_data()
 
-        # load record ids and build indexes (should be instant, since it's a new table)
+        # load data and record ids (should be instant, since it's a new table)
         obj.load_data()
         obj.load_record_ids()
-        obj.build_indexes()
 
         # add to database list of tables
         database.tables[obj.name] = obj
