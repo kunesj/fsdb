@@ -4,12 +4,20 @@ from .exceptions import FsdbOrderError, FsdbDomainError
 
 import re
 import copy
+import mimetypes
 
 
 def sanitize_filename(filename):
     assert isinstance(filename, str)  # bytes type not supported
     filename = filename.strip().replace(' ', '_')
     return re.sub(r'(?u)[^-\w.]', '_', filename)
+
+
+def guess_mimetype(path):
+    mime = mimetypes.guess_type(path)[0]
+    if mime is None:
+        return "application/octet-stream"
+    return mime
 
 
 def validate_order(order):

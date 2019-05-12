@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-from .exceptions import FsdbError, FsdbDatabaseClosed, FsdbObjectNotFound
-from .tools import sanitize_filename
+from .exceptions import FsdbError, FsdbDatabaseClosed
+from .tools import sanitize_filename, guess_mimetype
 
 import os
 import shutil
@@ -94,7 +94,13 @@ class Field(object):
                 data_values[self.name] = None
                 return None
 
-            return {'name': filename, 'data': None, 'path': file_path, }
+            # get size
+            size = os.path.getsize(file_path)
+
+            # get mime
+            mime = guess_mimetype(file_path)
+
+            return {'name': filename, 'data': None, 'path': file_path, 'mime': mime, 'size': size, }
 
         elif self.type == 'file_list':
             # get file dir path
@@ -109,8 +115,16 @@ class Field(object):
                 file_path = os.path.join(file_dir_path, filename)
                 if not os.path.isfile(file_path):
                     continue
+
+                # get size
+                size = os.path.getsize(file_path)
+
+                # get mime
+                mime = guess_mimetype(file_path)
+
                 # save file data
-                file_list.append({'name': filename, 'data': None, 'path': file_path, })
+                file_list.append({
+                    'name': filename, 'data': None, 'path': file_path, 'mime': mime, 'size': size, })
 
             return file_list
 
