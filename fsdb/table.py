@@ -210,7 +210,11 @@ class Table(object):
                 reverse = o.strip().split(' ')[-1].lower() == 'desc'
                 if name not in self.fields:
                     raise FsdbOrderError('Invalid field name "{}"!'.format(name))
-                records.sort(key=lambda x: x.read([name])[name], reverse=reverse)
+
+                if self.fields[name].type == 'str':
+                    records.sort(key=lambda x: str(x.read([name])[name]).lower(), reverse=reverse)
+                else:
+                    records.sort(key=lambda x: x.read([name])[name], reverse=reverse)
 
         # return records
         return records
